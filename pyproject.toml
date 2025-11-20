@@ -6,11 +6,16 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "confluent-kafka>=2.12.2",
+    "fastapi>=0.121.3",
     "google-auth>=2.43.0",
     "google-cloud-storage>=3.6.0",
+    "grafana-client>=5.0.1",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
+    "pydantic>=2.12.4",
     "python-dateutil>=2.9.0.post0",
+    "scikit-learn>=1.7.2",
+    "uvicorn>=0.38.0",
     "websocket-client>=1.9.0",
     "websockets>=15.0.1",
 ]
