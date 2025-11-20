@@ -1,0 +1,16 @@
+[project]
+name = "crypto-dp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "confluent-kafka>=2.12.2",
+    "google-auth>=2.43.0",
+    "google-cloud-storage>=3.6.0",
+    "numpy>=2.3.5",
+    "pandas>=2.3.3",
+    "python-dateutil>=2.9.0.post0",
+    "websocket-client>=1.9.0",
+    "websockets>=15.0.1",
+]
