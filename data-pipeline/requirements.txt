@@ -5,8 +5,5 @@ google-auth>=2.23.0
 python-dateutil>=2.8.2
 python-dotenv>=1.0.0
 asyncio>=3.4.3
-
-# For example FastAPI app (optional)
-fastapi>=0.104.0
-uvicorn>=0.24.0
+dotenv
 

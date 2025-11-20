@@ -167,13 +167,15 @@ async def stream_binance_to_kafka():
                             'buy_sell_ratio': 0, 'top_5_bids': [], 'top_5_asks': []
                         }
                     
-                    # Use latest trade price, or mid-price from order book, or ticker price as fallback
-                    if latest_price > 0:
-                        current_price = latest_price
-                    elif order_metrics['best_bid_price'] > 0 and order_metrics['best_ask_price'] > 0:
-                        # Use mid-price from order book (average of best bid and ask)
+                    # Always use order book mid-price for most current market price
+                    # This updates every second via depth stream, more accurate than infrequent trades
+                    if order_metrics['best_bid_price'] > 0 and order_metrics['best_ask_price'] > 0:
                         current_price = (order_metrics['best_bid_price'] + order_metrics['best_ask_price']) / 2
+                    elif latest_price > 0:
+                        # Fallback to latest trade price if order book unavailable
+                        current_price = latest_price
                     else:
+                        # Final fallback to 24hr ticker
                         current_price = latest_ticker.get('price', 0)
                     
                     total_volume_1s = buy_volume_1s + sell_volume_1s
