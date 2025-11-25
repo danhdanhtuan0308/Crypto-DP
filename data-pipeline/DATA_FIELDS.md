@@ -1,15 +1,15 @@
 # Kafka Message Data Fields
 
-This document describes all fields sent to Kafka for LTC/USDT dynamic pricing model.
+This document describes all fields sent to Kafka for BTC-USD dynamic pricing model.
 
 ## Message Structure
 
-Each Kafka message contains the following fields:
+Each Kafka message contains the following fields (using Coinbase data):
 
 ### Basic Information
 | Field | Type | Description | Use for ML |
 |-------|------|-------------|------------|
-| `symbol` | string | Trading pair (e.g., "LTCUSDT") | Feature: Asset identifier |
+| `symbol` | string | Trading pair (e.g., "BTC-USD") | Feature: Asset identifier |
 | `timestamp` | long | Event timestamp (ms) | Feature: Time-based patterns |
 | `ingestion_time` | string | When data was ingested (ISO 8601) | Feature: Processing latency |
 
@@ -66,25 +66,17 @@ Each Kafka message contains the following fields:
 #### 24-Hour Window
 | Field | Type | Description | Use for ML |
 |-------|------|-------------|------------|
-| `volume_24h` | float | Total LTC traded in 24h (from ticker) | Feature: Daily market activity |
+| `volume_24h` | float | Total BTC traded in 24h (from ticker) | Feature: Daily market activity |
 | `volume_24h_calculated` | float | Calculated 24h volume | Feature: Verification metric |
 | `buy_volume_24h_calculated` | float | Calculated 24h buy volume | Feature: Daily buy pressure |
 | `sell_volume_24h_calculated` | float | Calculated 24h sell volume | Feature: Daily sell pressure |
-| `quote_volume_24h` | float | Total USDT traded in 24h | Feature: Liquidity |
-| `number_of_trades` | int | Total trades in 24h | Feature: Market interest |
+| `number_of_trades` | int | Number of trades in 1 second | **Feature: Real-time trading intensity** |
+| `buy_sell_ratio` | float | Buy/Sell volume ratio (1s) | **Key Feature: >1 = buying pressure** |
 
-### Order Book Data (Supply & Demand)
-| Field | Type | Description | Use for ML |
-|-------|------|-------------|------------|
-| `best_bid_price` | float | Highest buy order price | Feature: Immediate demand |
-| `best_ask_price` | float | Lowest sell order price | Feature: Immediate supply |
-| `bid_ask_spread` | float | Difference between bid/ask | **Key Feature**: Market liquidity |
-| `spread_percent` | float | Spread as % of price | Feature: Market efficiency |
-| `total_bid_volume` | float | Total volume of top 10 buy orders | **Feature: Demand strength** |
-| `total_ask_volume` | float | Total volume of top 10 sell orders | **Feature: Supply strength** |
-| `buy_sell_ratio` | float | Bid volume / Ask volume | **Key Feature**: Market sentiment |
-| `top_5_bids` | array | Top 5 buy orders [price, quantity] | Feature: Order book depth |
-| `top_5_asks` | array | Top 5 sell orders [price, quantity] | Feature: Order book depth |
+### Notes on Data Availability
+- **Order book data NOT available**: Coinbase WebSocket connection issues prevented order book streaming
+- **Focus on trade data**: Using real-time matches (trades) for volume and price analysis
+- **No bid/ask spread**: Not collecting order book depth metrics
 
 ## Key Features for Dynamic Pricing Model
 
@@ -109,8 +101,7 @@ Each Kafka message contains the following fields:
 #### Long-Term (24-Hour)
 11. **`price_change_percent_24h`** - Daily trend
 12. **`volume_24h`** - Overall market interest
-13. **`buy_sell_ratio`** (order book) - >1 means more buyers waiting (bullish)
-14. **`bid_ask_spread`** - Market liquidity indicator
+13. **`buy_sell_ratio`** - Buy/Sell volume ratio from trades (>1 = more buying)
 
 ### Multi-Timeframe Strategy for ML
 
@@ -124,55 +115,85 @@ Each Kafka message contains the following fields:
 - **Weight 1s metrics** (30%): Real-time momentum
 - **Weight 1h metrics** (20%): Trend direction
 
-**Signal Strength:**
+**Signal Strength (Trade-Based):**
 - `buy_sell_volume_ratio_1s > 2.0` + `price_change_percent_1min > 0.5%` → **STRONG BUY**
 - `buy_sell_volume_ratio_1s < 0.5` + `price_change_percent_1min < -0.5%` → **STRONG SELL**
 - `volume_1s > 3x average_volume_1min` → **HIGH VOLATILITY ALERT**
+- `trade_count_1s > 50` → **HIGH TRADING ACTIVITY** (institutional interest)
 
-## Example Message
+## Example Message (Coinbase)
 
 ```json
 {
-  "symbol": "LTCUSDT",
-  "price": 95.43,
-  "timestamp": 1700000000000,
-  "volume_24h": 1234567.89,
-  "quote_volume_24h": 117800000.0,
-  "high_24h": 96.50,
-  "low_24h": 94.20,
-  "price_change_24h": 1.23,
-  "price_change_percent_24h": 1.31,
-  "number_of_trades": 45678,
-  "buy_volume_24h": 650000.0,
-  "volume_1s": 12.5,
-  "buy_volume_1s": 8.3,
-  "sell_volume_1s": 4.2,
-  "buy_sell_volume_ratio_1s": 1.98,
-  "trade_count_1s": 15,
-  "best_bid_price": 95.42,
-  "best_ask_price": 95.44,
-  "bid_ask_spread": 0.02,
-  "spread_percent": 0.021,
-  "total_bid_volume": 1500.5,
-  "total_ask_volume": 1200.3,
-  "buy_sell_ratio": 1.25,
-  "top_5_bids": [[95.42, 100.5], [95.41, 200.0], ...],
-  "top_5_asks": [[95.44, 150.3], [95.45, 180.0], ...],
-  "ingestion_time": "2025-11-19T23:00:00.000Z"
+  "symbol": "BTC-USD",
+  "price": 87809.34,
+  "timestamp": 1764043253104,
+  "volume_24h": 14130.78755984,
+  "high_24h": 89225.6,
+  "low_24h": 85213.17,
+  "price_change_24h": 401.34,
+  "price_change_percent_24h": 0.459,
+  "number_of_trades": 3,
+  "high_1s": 87809.34,
+  "low_1s": 87809.34,
+  "price_change_1s": 0.0,
+  "price_change_percent_1s": 0.0,
+  "volume_1s": 0.0434,
+  "buy_volume_1s": 0.0234,
+  "sell_volume_1s": 0.0200,
+  "buy_sell_volume_ratio_1s": 1.17,
+  "buy_sell_ratio": 1.17,
+  "trade_count_1s": 3,
+  "high_1min": 87815.50,
+  "low_1min": 87800.00,
+  "price_change_1min": 9.34,
+  "price_change_percent_1min": 0.011,
+  "volume_1min": 2.5643,
+  "buy_volume_1min": 1.3421,
+  "sell_volume_1min": 1.2222,
+  "high_1h": 88100.00,
+  "low_1h": 87200.00,
+  "price_change_1h": 234.50,
+  "price_change_percent_1h": 0.268,
+  "volume_1h": 145.234,
+  "buy_volume_1h": 78.123,
+  "sell_volume_1h": 67.111,
+  "volume_24h_calculated": 2345.67,
+  "buy_volume_24h_calculated": 1234.56,
+  "sell_volume_24h_calculated": 1111.11,
+  "ingestion_time": "2025-11-25T04:00:53.104220+00:00"
 }
 ```
 
 ## Data Update Frequency
 
-- **Ticker data**: ~1 second (24h stats)
-- **Order book depth**: 1 second (top 20 bids/asks)
-- **Trade stream**: Real-time (every trade as it happens)
-- **Kafka messages**: 1 per second (aggregates all trades in that second)
+- **Ticker data**: ~1 second (24h stats from Coinbase)
+- **Trade stream**: Real-time (every trade as it happens via matches channel)
+- **Kafka messages**: Exactly 1 per second (aggregates all trades in that second)
+- **Precision**: Timestamp accuracy ±10ms using async timer
+
+## Data Source
+
+- **Exchange**: Coinbase Advanced Trade API
+- **WebSocket URL**: wss://ws-feed.exchange.coinbase.com
+- **Channels**: 
+  - `ticker`: 24hr volume, high, low, open
+  - `matches`: Real-time trades (price, size, side)
+- **No Order Book**: Order book streaming disabled due to connection issues
 
 ## Notes for ML Model
 
-- **Target Variable**: `price` (next price prediction)
+- **Target Variable**: `price` (next 1-second or 1-minute price prediction)
 - **Lagging Features**: Create rolling windows (5s, 30s, 1m, 5m averages)
-- **Leading Indicators**: `buy_sell_ratio`, `bid_ask_spread`, `total_bid_volume`
+- **Leading Indicators**: `buy_sell_ratio`, `volume_1s`, `trade_count_1s`
 - **Sentiment**: When `buy_sell_ratio > 1.2`, strong buying pressure → price likely to increase
-- **Liquidity Risk**: When `spread_percent > 0.1%`, market is less liquid → higher volatility
+- **Trade Intensity**: When `trade_count_1s > 20`, high activity → potential breakout
+- **Volume Confirmation**: `buy_volume_1s` increasing + `price_change_1s` positive → bullish confirmation
+
+## Implementation Details
+
+- **Producer**: `coinbase_kafka_producer.py`
+- **Architecture**: Dual async tasks (WebSocket receiver + 1-second timer sender)
+- **Timing**: Independent timer ensures exactly 1-second intervals
+- **State Management**: Shared dictionary for real-time updates between tasks
+- **Reliability**: Automatic retry logic (max 5 retries on connection loss)

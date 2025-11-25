@@ -1,1 +1,1 @@
-worker: cd data-pipeline && python binance_kafka_producer.py
+worker: cd data-pipeline && python coinbase_kafka_producer.py
