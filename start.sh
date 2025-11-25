@@ -12,7 +12,7 @@ python kafka_1min_aggregator.py &
 PID2=$!
 
 echo "Starting GCS Parquet Writer..."
-python gcs_parquet_writer.py &
+python gcs_kafka_consumer.py &
 PID3=$!
 
 echo "All processes started:"
