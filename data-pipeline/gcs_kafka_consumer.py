@@ -1,0 +1,187 @@
+"""
+GCS Parquet Writer
+Consumes from btc_1min_agg topic and writes Parquet files to GCS
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+from confluent_kafka import Consumer
+import pandas as pd
+from google.cloud import storage
+import pyarrow as pa
+import pyarrow.parquet as pq
+from dotenv import load_dotenv
+import logging
+import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+# Configuration
+KAFKA_CONFIG = {
+    'bootstrap.servers': os.getenv('CONFLUENT_KAFKA_BOOTSTRAP_SERVERS'),
+    'security.protocol': 'SASL_SSL',
+    'sasl.mechanisms': 'PLAIN',
+    'sasl.username': os.getenv('CONFLUENT_KAFKA_API_KEY_GCS'),
+    'sasl.password': os.getenv('CONFLUENT_KAFKA_API_KEY_SECRET_GCS'),
+    'group.id': 'gcs-parquet-writer',
+    'auto.offset.reset': 'latest',
+    'enable.auto.commit': True,
+}
+
+SOURCE_TOPIC = 'btc_1min_agg'
+GCS_BUCKET = os.getenv('GCS_BUCKET', 'crypto-db-east1')
+GCS_CREDENTIALS_PATH = os.getenv('GCS_CREDENTIALS_PATH')
+MODE = os.getenv('CONNECTOR_MODE', 'test')  # 'test' or 'production'
+
+# Set GCS credentials
+if GCS_CREDENTIALS_PATH:
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GCS_CREDENTIALS_PATH
+
+
+class ParquetWriter:
+    def __init__(self, bucket_name, mode='test'):
+        self.bucket_name = bucket_name
+        self.mode = mode
+        self.storage_client = storage.Client()
+        self.bucket = self.storage_client.bucket(bucket_name)
+        self.buffer = []
+        self.file_count = 0
+        
+        # Test: 1 file per minute (1 row each)
+        # Production: 1 file per hour (60 rows each)
+        if mode == 'test':
+            self.buffer_size = 1
+            self.flush_interval = 60  # 1 minute
+            logger.info("🧪 TEST MODE: New file every 1 minute")
+        else:
+            self.buffer_size = 60
+            self.flush_interval = 3600  # 1 hour
+            logger.info("🚀 PRODUCTION MODE: New file every 1 hour")
+        
+        self.last_flush = time.time()
+    
+    def add_record(self, record):
+        """Add a record to the buffer"""
+        self.buffer.append(record)
+        
+        # Check if we should flush
+        current_time = time.time()
+        time_elapsed = current_time - self.last_flush
+        
+        if len(self.buffer) >= self.buffer_size or time_elapsed >= self.flush_interval:
+            self.flush()
+    
+    def flush(self):
+        """Write buffer to GCS as Parquet file"""
+        if not self.buffer:
+            return
+        
+        try:
+            # Convert to DataFrame
+            df = pd.DataFrame(self.buffer)
+            
+            # Generate file path
+            timestamp = datetime.now(timezone.utc)
+            year = timestamp.strftime('%Y')
+            month = timestamp.strftime('%m')
+            day = timestamp.strftime('%d')
+            hour = timestamp.strftime('%H')
+            
+            # Path format: year=2025/month=11/day=25/hour=19/btc_1min_agg+0+0000000001.parquet
+            file_name = f"btc_1min_agg+0+{self.file_count:010d}.snappy.parquet"
+            blob_path = f"year={year}/month={month}/day={day}/hour={hour}/{file_name}"
+            
+            # Convert to Parquet in memory
+            table = pa.Table.from_pandas(df)
+            parquet_buffer = pa.BufferOutputStream()
+            pq.write_table(
+                table, 
+                parquet_buffer,
+                compression='snappy',
+                use_dictionary=True,
+                version='2.6'
+            )
+            
+            # Upload to GCS
+            blob = self.bucket.blob(blob_path)
+            blob.upload_from_string(
+                parquet_buffer.getvalue().to_pybytes(),
+                content_type='application/octet-stream'
+            )
+            
+            logger.info(
+                f"✅ Uploaded: gs://{self.bucket_name}/{blob_path} "
+                f"({len(self.buffer)} rows, {blob.size / 1024:.2f} KB)"
+            )
+            
+            # Reset buffer
+            self.buffer.clear()
+            self.file_count += 1
+            self.last_flush = time.time()
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to write Parquet: {e}")
+            raise
+
+
+def main():
+    logger.info("=" * 70)
+    logger.info("🚀 GCS Parquet Writer Started")
+    logger.info("=" * 70)
+    logger.info(f"Source topic: {SOURCE_TOPIC}")
+    logger.info(f"Target bucket: gs://{GCS_BUCKET}")
+    
+    consumer = Consumer(KAFKA_CONFIG)
+    writer = ParquetWriter(GCS_BUCKET, mode=MODE)
+    
+    consumer.subscribe([SOURCE_TOPIC])
+    logger.info(f"Subscribed to {SOURCE_TOPIC}")
+    
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            
+            if msg is None:
+                # Check if we should flush due to timeout
+                current_time = time.time()
+                if writer.buffer and (current_time - writer.last_flush) >= writer.flush_interval:
+                    logger.info("⏰ Flush interval reached, writing file...")
+                    writer.flush()
+                continue
+            
+            if msg.error():
+                logger.error(f"Consumer error: {msg.error()}")
+                continue
+            
+            # Parse message
+            try:
+                data = json.loads(msg.value().decode('utf-8'))
+                writer.add_record(data)
+                logger.debug(f"Added record to buffer (buffer size: {len(writer.buffer)})")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse message: {e}")
+                continue
+    
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        # Flush remaining buffer
+        if writer.buffer:
+            logger.info("Flushing remaining buffer...")
+            writer.flush()
+    
+    finally:
+        consumer.close()
+        logger.info("Shutdown complete")
+
+
+if __name__ == "__main__":
+    main()
