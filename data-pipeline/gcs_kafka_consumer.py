@@ -50,7 +50,18 @@ class ParquetWriter:
     def __init__(self, bucket_name, mode='test'):
         self.bucket_name = bucket_name
         self.mode = mode
-        self.storage_client = storage.Client()
+        
+        # Load credentials from environment variable or file
+        creds_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if creds_json:
+            import json
+            from google.oauth2 import service_account
+            creds_dict = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            self.storage_client = storage.Client(credentials=credentials, project=creds_dict['project_id'])
+        else:
+            self.storage_client = storage.Client()
+        
         self.bucket = self.storage_client.bucket(bucket_name)
         self.buffer = []
         self.file_count = 0
