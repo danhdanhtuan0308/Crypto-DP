@@ -217,14 +217,14 @@ if df_full is not None and not df_full.empty:
     else:  # 1 Day
         cutoff_time = now - timedelta(hours=24)
     
-    # Debug: Show cutoff time
-    st.sidebar.text(f"DEBUG: Cutoff: {cutoff_time.strftime('%H:%M:%S')}")
-    st.sidebar.text(f"DEBUG: Data range: {df_full['window_start'].min()} to {df_full['window_start'].max()}")
+    # Debug: Show cutoff time (in Eastern)
+    st.sidebar.text(f"DEBUG: Now ET: {now.strftime('%H:%M:%S')}")
+    st.sidebar.text(f"DEBUG: Cutoff ET: {cutoff_time.strftime('%H:%M:%S')}")
     
-    # Convert window_start to Eastern time for comparison (make naive for comparison with cutoff_time)
-    df_full['window_start_dt'] = pd.to_datetime(df_full['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
+    # Convert window_start from UTC to Eastern time for comparison
+    df_full['window_start_et'] = pd.to_datetime(df_full['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
     cutoff_time_naive = cutoff_time.replace(tzinfo=None)
-    df = df_full[df_full['window_start_dt'] >= cutoff_time_naive].copy()
+    df = df_full[df_full['window_start_et'] >= cutoff_time_naive].copy()
     
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
@@ -232,12 +232,13 @@ if df_full is not None and not df_full.empty:
     
     st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
     
-    # Display last update time
-    last_update = df['window_start'].max()
+    # Display last update time - convert UTC to Eastern
+    last_update_utc = df['window_start'].max()
+    last_update_eastern = pd.Timestamp(last_update_utc).tz_localize('UTC').tz_convert(EASTERN)
     now_eastern = datetime.now(EASTERN)
-    data_age_seconds = (now_eastern.replace(tzinfo=None) - pd.Timestamp(last_update).to_pydatetime()).total_seconds()
+    data_age_seconds = (now_eastern - last_update_eastern).total_seconds()
     
-    st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')} ET")
+    st.sidebar.success(f"Last Data: {last_update_eastern.strftime('%Y-%m-%d %H:%M:%S')} ET")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
