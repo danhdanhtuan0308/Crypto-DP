@@ -170,7 +170,7 @@ class MinuteAggregator:
             'order_imbalance_ratio_1m': order_imbalance_ratio_1m,
             
             # Additional metrics
-            'total_trades_1m': total_trades,
+            'trade_count_1m': total_trades,
             'avg_buy_sell_ratio_1m': avg_buy_sell_ratio_1m,
             'price_change_1m': price_change_1m,
             'price_change_percent_1m': price_change_percent_1m,

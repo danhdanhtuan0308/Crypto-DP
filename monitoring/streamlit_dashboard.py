@@ -210,12 +210,19 @@ if df_full is not None and not df_full.empty:
     else:  # 1 Day
         cutoff_time = now - timedelta(hours=24)
     
-    # Filter dataframe to selected timeframe
-    df = df_full[df_full['window_start'] >= cutoff_time].copy()
+    # Debug: Show cutoff time
+    st.sidebar.text(f"DEBUG: Cutoff: {cutoff_time.strftime('%H:%M:%S')}")
+    st.sidebar.text(f"DEBUG: Data range: {df_full['window_start'].min()} to {df_full['window_start'].max()}")
+    
+    # Filter dataframe to selected timeframe (convert to datetime for comparison)
+    df_full['window_start_dt'] = pd.to_datetime(df_full['window_start'])
+    df = df_full[df_full['window_start_dt'] >= cutoff_time].copy()
     
     if df.empty:
-        st.warning(f"No data available for the last {timeline_option}")
-        df = df_full
+        st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
+        df = df_full.copy()
+    
+    st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
     
     # Display last update time
     last_update = df['window_start'].max()
@@ -272,6 +279,15 @@ if df_full is not None and not df_full.empty:
         )
     
     with col6:
+        st.metric(
+            label="Trade Count (1m)",
+            value=f"{latest.get('trade_count_1m', 0):.0f}",
+        )
+    
+    # Second row of metrics
+    col7, col8, col9 = st.columns(3)
+    
+    with col7:
         st.metric(
             label="Order Imbalance",
             value=f"{latest['order_imbalance_ratio_1m']:.4f}",
