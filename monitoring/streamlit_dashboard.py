@@ -63,8 +63,8 @@ timeline_map = {
 }
 MAX_FILES = timeline_map[timeline_option]
 
-# Force cache invalidation by including current time bucket
-current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
+# Force cache invalidation by including current time bucket (changes every 10 seconds)
+current_time_bucket = datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-1]  # Changes every 10 seconds
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
@@ -74,12 +74,12 @@ GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 # Eastern Time Zone
 EASTERN = pytz.timezone('America/New_York')
 
-@st.cache_data(ttl=20)  # Cache for 20 seconds for more frequent updates
-def load_data_from_gcs(current_minute, max_files, timeline):
+@st.cache_data(ttl=10)  # Cache for 10 seconds for more frequent updates
+def load_data_from_gcs(time_bucket, max_files, timeline):
     """Load latest parquet files from GCS
     
     Args:
-        current_minute: Current time bucket to force cache refresh every minute
+        time_bucket: Current time bucket to force cache refresh every 10 seconds
         max_files: Number of files to load (changes cache when timeline changes)
         timeline: Timeline option (changes cache when timeframe changes)
     """
@@ -202,9 +202,9 @@ def load_data_from_gcs(current_minute, max_files, timeline):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - pass current_minute, MAX_FILES and timeline_option to force refresh
+# Load data - pass time_bucket, MAX_FILES and timeline_option to force refresh
 with st.spinner("Loading latest data from GCS..."):
-    df_full = load_data_from_gcs(current_minute, MAX_FILES, timeline_option)
+    df_full = load_data_from_gcs(current_time_bucket, MAX_FILES, timeline_option)
 
 if df_full is not None and not df_full.empty:
     # Filter data by selected timeframe
