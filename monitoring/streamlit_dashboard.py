@@ -25,17 +25,24 @@ st.markdown("Real-time cryptocurrency data aggregated every minute")
 
 # Sidebar configuration
 st.sidebar.header("Settings")
-refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
+refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 15, 120, 30)  # Faster refresh options
 lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 6, 1)  # Default to 1 hour for faster loading
+
+# Force cache invalidation by including current time bucket
+current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-@st.cache_data(ttl=60)  # Cache for 60 seconds
-def load_data_from_gcs():
-    """Load latest parquet files from GCS"""
+@st.cache_data(ttl=20)  # Cache for 20 seconds for more frequent updates
+def load_data_from_gcs(current_minute):
+    """Load latest parquet files from GCS
+    
+    Args:
+        current_minute: Current time bucket to force cache refresh every minute
+    """
     try:
         # Initialize client with credentials from Streamlit secrets or environment
         if 'gcp_service_account' in st.secrets:
@@ -50,10 +57,14 @@ def load_data_from_gcs():
             client = storage.Client(project=GCP_PROJECT_ID)
         bucket = client.bucket(BUCKET_NAME)
         
+        # Calculate time range for files we need
+        now = datetime.utcnow()
+        start_time = now - timedelta(hours=lookback_hours)
+        
         # List all blobs with prefix (limit to recent files only)
         # Use max_results to avoid loading ALL files
         max_files = lookback_hours * 60  # 1 file per minute
-        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=max_files * 2))
+        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=max_files * 3))
         
         if not blobs:
             st.error(f"No data found in gs://{BUCKET_NAME}/{PREFIX}")
@@ -102,14 +113,25 @@ def load_data_from_gcs():
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data
-with st.spinner("Loading data from GCS..."):
-    df = load_data_from_gcs()
+# Load data - pass current_minute to force refresh every minute
+with st.spinner("Loading latest data from GCS..."):
+    df = load_data_from_gcs(current_minute)
 
 if df is not None and not df.empty:
     # Display last update time
     last_update = df['window_start'].max()
-    st.sidebar.success(f"Last Update: {last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+    data_age_seconds = (datetime.now() - last_update.replace(tzinfo=None)).total_seconds()
+    
+    st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Show data freshness
+    if data_age_seconds < 90:
+        st.sidebar.success(f"✅ Fresh data ({int(data_age_seconds)}s old)")
+    elif data_age_seconds < 180:
+        st.sidebar.warning(f"⚠️ Data is {int(data_age_seconds)}s old")
+    else:
+        st.sidebar.error(f"❌ Data is {int(data_age_seconds)}s old")
+    
     st.sidebar.info(f"Total Records: {len(df)}")
     
     # Latest metrics
@@ -288,12 +310,16 @@ if df is not None and not df.empty:
         st.write(f"Max: {df['volatility_1m'].max():.4f}")
         st.write(f"Current: {latest['volatility_1m']:.4f}")
     
-    # Auto-refresh countdown
+    # Auto-refresh with countdown
     st.sidebar.markdown("---")
-    st.sidebar.write(f"Auto-refresh in {refresh_interval} seconds")
+    countdown_placeholder = st.sidebar.empty()
     
-    # Auto-refresh
-    time.sleep(refresh_interval)
+    # Countdown timer
+    for remaining in range(refresh_interval, 0, -1):
+        countdown_placeholder.write(f"🔄 Refreshing in {remaining} seconds...")
+        time.sleep(1)
+    
+    countdown_placeholder.write("🔄 Refreshing now...")
     st.rerun()
 
 else:
