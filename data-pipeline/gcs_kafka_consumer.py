@@ -39,7 +39,6 @@ KAFKA_CONFIG = {
 SOURCE_TOPIC = 'btc_1min_agg'
 GCS_BUCKET = os.getenv('GCS_BUCKET', 'crypto-db-east1')
 GCS_CREDENTIALS_PATH = os.getenv('GCS_CREDENTIALS_PATH')
-MODE = os.getenv('CONNECTOR_MODE', 'test')  # 'test' or 'production'
 
 # Set GCS credentials
 if GCS_CREDENTIALS_PATH:
@@ -47,9 +46,8 @@ if GCS_CREDENTIALS_PATH:
 
 
 class ParquetWriter:
-    def __init__(self, bucket_name, mode='test'):
+    def __init__(self, bucket_name):
         self.bucket_name = bucket_name
-        self.mode = mode
         
         # Load credentials from environment variable or file
         creds_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
@@ -66,16 +64,10 @@ class ParquetWriter:
         self.buffer = []
         self.file_count = 0
         
-        # Test: 1 file per minute (1 row each)
-        # Production: 1 file per hour (60 rows each)
-        if mode == 'test':
-            self.buffer_size = 1
-            self.flush_interval = 60  # 1 minute
-            logger.info("🧪 TEST MODE: New file every 1 minute")
-        else:
-            self.buffer_size = 60
-            self.flush_interval = 3600  # 1 hour
-            logger.info("🚀 PRODUCTION MODE: New file every 1 hour")
+        # 1 file per minute (1 row each)
+        self.buffer_size = 1
+        self.flush_interval = 60  # 1 minute
+        logger.info("📝 Writing new file every 1 minute")
         
         self.last_flush = time.time()
     
@@ -151,7 +143,7 @@ def main():
     logger.info(f"Target bucket: gs://{GCS_BUCKET}")
     
     consumer = Consumer(KAFKA_CONFIG)
-    writer = ParquetWriter(GCS_BUCKET, mode=MODE)
+    writer = ParquetWriter(GCS_BUCKET)
     
     consumer.subscribe([SOURCE_TOPIC])
     logger.info(f"Subscribed to {SOURCE_TOPIC}")
