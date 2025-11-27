@@ -77,13 +77,10 @@ class ParquetWriter:
     def add_record(self, record):
         """Add a record to the buffer"""
         self.buffer.append(record)
+        logger.info(f"📥 Received 1min agg record, buffer size: {len(self.buffer)}")
         
-        # Check if we should flush
-        current_time = time.time()
-        time_elapsed = current_time - self.last_flush
-        
-        if len(self.buffer) >= self.buffer_size or time_elapsed >= self.flush_interval:
-            self.flush()
+        # Flush immediately when we have 1 record (1-minute data)
+        self.flush()
     
     def flush(self):
         """Write buffer to GCS as Parquet file"""
