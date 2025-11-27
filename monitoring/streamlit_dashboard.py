@@ -23,6 +23,10 @@ st.set_page_config(
 st.title("₿ Bitcoin Live Dashboard - 1-Minute Updates")
 st.markdown("Real-time cryptocurrency data aggregated every minute")
 
+# Initialize session state for timeline persistence
+if 'selected_timeline' not in st.session_state:
+    st.session_state.selected_timeline = "1 Day"
+
 # Sidebar configuration
 st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
@@ -30,11 +34,18 @@ st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 
 # Timeline selector (like TradingView)
 st.sidebar.subheader("📊 Chart Timeline")
+timeline_options = ["1 Hour", "4 Hours", "1 Day", "Full Data"]
+current_index = timeline_options.index(st.session_state.selected_timeline)
+
 timeline_option = st.sidebar.radio(
     "Select timeframe:",
-    ["1 Hour", "4 Hours", "1 Day", "Full Data"],
-    index=2  # Default to 1 Day
+    timeline_options,
+    index=current_index,
+    key="timeline_radio"
 )
+
+# Save selection to session state
+st.session_state.selected_timeline = timeline_option
 
 # Map timeline to max files to load
 timeline_map = {
@@ -203,8 +214,8 @@ if df is not None and not df.empty:
     # Latest metrics
     latest = df.iloc[-1]
     
-    # Key Metrics Row
-    col1, col2, col3, col4 = st.columns(4)
+    # Key Metrics Row (6 columns)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         st.metric(
@@ -221,15 +232,27 @@ if df is not None and not df.empty:
     
     with col3:
         st.metric(
-            label="Volume (1m)",
-            value=f"{latest['total_volume_1m']:.2f} BTC",
+            label="Buy Volume (1m)",
+            value=f"{latest['total_buy_volume_1m']:.4f} BTC",
         )
     
     with col4:
         st.metric(
+            label="Sell Volume (1m)",
+            value=f"{latest['total_sell_volume_1m']:.4f} BTC",
+        )
+    
+    with col5:
+        st.metric(
+            label="Total Volume (1m)",
+            value=f"{latest['total_volume_1m']:.4f} BTC",
+        )
+    
+    with col6:
+        st.metric(
             label="Order Imbalance",
             value=f"{latest['order_imbalance_ratio_1m']:.4f}",
-            delta="Buy Pressure" if latest['order_imbalance_ratio_1m'] > 0 else "Sell Pressure"
+            delta="Buy 📈" if latest['order_imbalance_ratio_1m'] > 0 else "Sell 📉"
         )
     
     # Chart 1: Price Chart (OHLC Candlestick)
