@@ -221,9 +221,10 @@ if df_full is not None and not df_full.empty:
     st.sidebar.text(f"DEBUG: Cutoff: {cutoff_time.strftime('%H:%M:%S')}")
     st.sidebar.text(f"DEBUG: Data range: {df_full['window_start'].min()} to {df_full['window_start'].max()}")
     
-    # Filter dataframe to selected timeframe (convert to datetime for comparison)
-    df_full['window_start_dt'] = pd.to_datetime(df_full['window_start'])
-    df = df_full[df_full['window_start_dt'] >= cutoff_time].copy()
+    # Convert window_start to Eastern time for comparison (make naive for comparison with cutoff_time)
+    df_full['window_start_dt'] = pd.to_datetime(df_full['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
+    cutoff_time_naive = cutoff_time.replace(tzinfo=None)
+    df = df_full[df_full['window_start_dt'] >= cutoff_time_naive].copy()
     
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
