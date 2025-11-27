@@ -37,8 +37,17 @@ GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 def load_data_from_gcs():
     """Load latest parquet files from GCS"""
     try:
-        # Initialize client with project ID
-        client = storage.Client(project=GCP_PROJECT_ID)
+        # Initialize client with credentials from Streamlit secrets or environment
+        if 'gcp_service_account' in st.secrets:
+            # Running on Streamlit Cloud - use secrets
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"]
+            )
+            client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
+        else:
+            # Running locally - use environment variable
+            client = storage.Client(project=GCP_PROJECT_ID)
         bucket = client.bucket(BUCKET_NAME)
         
         # List all blobs with prefix
