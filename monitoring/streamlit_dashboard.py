@@ -28,8 +28,22 @@ st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
 st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 
-# Load full day of data (24 hours * 60 minutes = 1440 files max)
-MAX_FILES = 1440  # Full day of 1-minute data
+# Timeline selector (like TradingView)
+st.sidebar.subheader("📊 Chart Timeline")
+timeline_option = st.sidebar.radio(
+    "Select timeframe:",
+    ["1 Hour", "4 Hours", "1 Day", "Full Data"],
+    index=2  # Default to 1 Day
+)
+
+# Map timeline to max files to load
+timeline_map = {
+    "1 Hour": 60,      # 60 minutes of data
+    "4 Hours": 240,    # 4 * 60 minutes
+    "1 Day": 1440,     # 24 * 60 minutes
+    "Full Data": 1440  # Full day
+}
+MAX_FILES = timeline_map[timeline_option]
 
 # Force cache invalidation by including current time bucket
 current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
