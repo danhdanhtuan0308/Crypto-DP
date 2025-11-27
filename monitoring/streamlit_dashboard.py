@@ -65,12 +65,13 @@ PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 @st.cache_data(ttl=20)  # Cache for 20 seconds for more frequent updates
-def load_data_from_gcs(current_minute, max_files):
+def load_data_from_gcs(current_minute, max_files, timeline):
     """Load latest parquet files from GCS
     
     Args:
         current_minute: Current time bucket to force cache refresh every minute
         max_files: Number of files to load (changes cache when timeline changes)
+        timeline: Timeline option (changes cache when timeframe changes)
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -191,9 +192,9 @@ def load_data_from_gcs(current_minute, max_files):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - pass current_minute and MAX_FILES to force refresh
+# Load data - pass current_minute, MAX_FILES and timeline_option to force refresh
 with st.spinner("Loading latest data from GCS..."):
-    df_full = load_data_from_gcs(current_minute, MAX_FILES)
+    df_full = load_data_from_gcs(current_minute, MAX_FILES, timeline_option)
 
 if df_full is not None and not df_full.empty:
     # Filter data by selected timeframe
