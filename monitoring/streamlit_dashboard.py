@@ -65,11 +65,12 @@ PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 @st.cache_data(ttl=20)  # Cache for 20 seconds for more frequent updates
-def load_data_from_gcs(current_minute):
+def load_data_from_gcs(current_minute, max_files):
     """Load latest parquet files from GCS
     
     Args:
         current_minute: Current time bucket to force cache refresh every minute
+        max_files: Number of files to load (changes cache when timeline changes)
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -125,7 +126,7 @@ def load_data_from_gcs(current_minute):
         
         # Sort by creation time and take only most recent
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        latest_blobs = blobs_sorted[:MAX_FILES]
+        latest_blobs = blobs_sorted[:max_files]  # Use parameter instead of global
         
         st.sidebar.success(f"✅ Found {len(blobs)} files, loading {len(latest_blobs)}...")
         
@@ -190,9 +191,9 @@ def load_data_from_gcs(current_minute):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - pass current_minute to force refresh every minute
+# Load data - pass current_minute and MAX_FILES to force refresh
 with st.spinner("Loading latest data from GCS..."):
-    df = load_data_from_gcs(current_minute)
+    df = load_data_from_gcs(current_minute, MAX_FILES)
 
 if df is not None and not df.empty:
     # Display last update time
