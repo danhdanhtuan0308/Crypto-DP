@@ -234,7 +234,8 @@ if df_full is not None and not df_full.empty:
     
     # Display last update time
     last_update = df['window_start'].max()
-    data_age_seconds = (datetime.now(EASTERN) - last_update.replace(tzinfo=None)).total_seconds()
+    now_eastern = datetime.now(EASTERN)
+    data_age_seconds = (now_eastern.replace(tzinfo=None) - pd.Timestamp(last_update).to_pydatetime()).total_seconds()
     
     st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')} ET")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
