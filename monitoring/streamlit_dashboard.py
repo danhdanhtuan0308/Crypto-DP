@@ -46,17 +46,21 @@ def load_data_from_gcs(current_minute):
     try:
         # Initialize client with credentials from environment or Streamlit secrets
         import os
+        import json
         
         # Try environment variable first (Railway, local)
         creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+        
         if creds_json:
+            # Using environment variable (Railway/local)
+            st.sidebar.info("🔑 Using GCP_SERVICE_ACCOUNT_JSON env var")
             from google.oauth2 import service_account
-            import json
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
             # Streamlit Cloud - use secrets
+            st.sidebar.info("🔑 Using Streamlit secrets")
             from google.oauth2 import service_account
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
@@ -64,7 +68,9 @@ def load_data_from_gcs(current_minute):
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         else:
             # Fall back to default credentials (local with GOOGLE_APPLICATION_CREDENTIALS)
+            st.sidebar.warning("⚠️ Using default GCP credentials")
             client = storage.Client(project=GCP_PROJECT_ID)
+        
         bucket = client.bucket(BUCKET_NAME)
         
         # Calculate time range for files we need
