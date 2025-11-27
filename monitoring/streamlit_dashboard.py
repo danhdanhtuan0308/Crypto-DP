@@ -96,20 +96,40 @@ def load_data_from_gcs(current_minute):
         
         st.sidebar.success(f"✅ Found {len(blobs)} files, loading {len(latest_blobs)}...")
         
-        # Read parquet files with detailed progress
+        # Read parquet files in parallel using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import io
+        
         dfs = []
         progress_text = st.sidebar.empty()
         progress_bar = st.progress(0)
         
-        for i, blob in enumerate(latest_blobs):
+        def load_blob(blob):
+            """Load a single blob and return dataframe"""
             try:
-                progress_text.text(f"Loading file {i+1}/{len(latest_blobs)}: {blob.name.split('/')[-1]}")
-                df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
-                dfs.append(df)
-                progress_bar.progress((i + 1) / len(latest_blobs))
+                # Download blob content to memory first (faster)
+                blob_data = blob.download_as_bytes()
+                df = pd.read_parquet(io.BytesIO(blob_data))
+                return df, blob.name
             except Exception as e:
-                st.sidebar.error(f"⚠️ Skipped file: {e}")
-                continue
+                return None, f"Error: {str(e)[:50]}"
+        
+        # Load files in parallel (up to 3 at a time)
+        loaded = 0
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_blob = {executor.submit(load_blob, blob): blob for blob in latest_blobs}
+            
+            for future in as_completed(future_to_blob):
+                df, info = future.result()
+                loaded += 1
+                
+                if df is not None:
+                    dfs.append(df)
+                    progress_text.text(f"✅ Loaded {loaded}/{len(latest_blobs)} files")
+                else:
+                    progress_text.text(f"⚠️ Skipped 1 file - {loaded}/{len(latest_blobs)}")
+                
+                progress_bar.progress(loaded / len(latest_blobs))
         
         progress_bar.empty()
         progress_text.empty()
