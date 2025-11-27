@@ -33,6 +33,11 @@ st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
 st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 
+# Clear cache button
+if st.sidebar.button("🗑️ Clear Cache"):
+    st.cache_data.clear()
+    st.rerun()
+
 # Timeline selector (like TradingView)
 st.sidebar.subheader("📊 Chart Timeline")
 timeline_options = ["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "1 Day"]
@@ -229,6 +234,9 @@ if df_full is not None and not df_full.empty:
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
         df = df_full.copy()
+    
+    # Use Eastern time for all displays
+    df['window_start'] = df['window_start_et']
     
     st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
     
