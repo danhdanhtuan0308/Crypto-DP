@@ -193,14 +193,35 @@ def load_data_from_gcs(current_minute, max_files):
 
 # Load data - pass current_minute and MAX_FILES to force refresh
 with st.spinner("Loading latest data from GCS..."):
-    df = load_data_from_gcs(current_minute, MAX_FILES)
+    df_full = load_data_from_gcs(current_minute, MAX_FILES)
 
-if df is not None and not df.empty:
+if df_full is not None and not df_full.empty:
+    # Filter data by selected timeframe
+    now = datetime.now()
+    
+    # Calculate cutoff time based on timeline selection
+    if timeline_option == "1 Hour":
+        cutoff_time = now - timedelta(hours=1)
+    elif timeline_option == "4 Hours":
+        cutoff_time = now - timedelta(hours=4)
+    elif timeline_option == "1 Day":
+        cutoff_time = now - timedelta(hours=24)
+    else:  # Full Data
+        cutoff_time = df_full['window_start'].min()
+    
+    # Filter dataframe to selected timeframe
+    df = df_full[df_full['window_start'] >= cutoff_time].copy()
+    
+    if df.empty:
+        st.warning(f"No data available for the last {timeline_option}")
+        df = df_full
+    
     # Display last update time
     last_update = df['window_start'].max()
     data_age_seconds = (datetime.now() - last_update.replace(tzinfo=None)).total_seconds()
     
     st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+    st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
     if data_age_seconds < 90:
@@ -210,7 +231,7 @@ if df is not None and not df.empty:
     else:
         st.sidebar.error(f"❌ Data is {int(data_age_seconds)}s old")
     
-    st.sidebar.info(f"Total Records: {len(df)}")
+    st.sidebar.info(f"Records: {len(df)}")
     
     # Latest metrics
     latest = df.iloc[-1]
