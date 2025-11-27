@@ -34,7 +34,7 @@ st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 
 # Timeline selector (like TradingView)
 st.sidebar.subheader("📊 Chart Timeline")
-timeline_options = ["1 Hour", "3 Hours", "6 Hours", "1 Day"]
+timeline_options = ["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "1 Day"]
 current_index = timeline_options.index(st.session_state.selected_timeline) if st.session_state.selected_timeline in timeline_options else 3
 
 timeline_option = st.sidebar.radio(
@@ -49,10 +49,11 @@ st.session_state.selected_timeline = timeline_option
 
 # Map timeline to max files to load
 timeline_map = {
-    "1 Hour": 60,      # 60 minutes
-    "3 Hours": 180,    # 3 * 60 minutes
-    "6 Hours": 360,    # 6 * 60 minutes
-    "1 Day": 1440      # 24 * 60 minutes
+    "5 Minutes": 5,       # 5 minutes
+    "15 Minutes": 15,     # 15 minutes
+    "30 Minutes": 30,     # 30 minutes
+    "1 Hour": 60,         # 60 minutes
+    "1 Day": 1440         # 24 * 60 minutes
 }
 MAX_FILES = timeline_map[timeline_option]
 
@@ -201,12 +202,14 @@ if df_full is not None and not df_full.empty:
     now = datetime.now()
     
     # Calculate cutoff time based on timeline selection
-    if timeline_option == "1 Hour":
+    if timeline_option == "5 Minutes":
+        cutoff_time = now - timedelta(minutes=5)
+    elif timeline_option == "15 Minutes":
+        cutoff_time = now - timedelta(minutes=15)
+    elif timeline_option == "30 Minutes":
+        cutoff_time = now - timedelta(minutes=30)
+    elif timeline_option == "1 Hour":
         cutoff_time = now - timedelta(hours=1)
-    elif timeline_option == "3 Hours":
-        cutoff_time = now - timedelta(hours=3)
-    elif timeline_option == "6 Hours":
-        cutoff_time = now - timedelta(hours=6)
     else:  # 1 Day
         cutoff_time = now - timedelta(hours=24)
     
