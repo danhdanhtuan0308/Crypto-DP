@@ -50,14 +50,17 @@ class ParquetWriter:
         self.bucket_name = bucket_name
         
         # Load credentials from environment variable or file
-        creds_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        # Check both possible env var names
+        creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
         if creds_json:
             import json
             from google.oauth2 import service_account
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
-            self.storage_client = storage.Client(credentials=credentials, project=creds_dict['project_id'])
+            self.storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id', 'crypto-dp'))
+            logger.info(f"🔑 Using service account: {creds_dict.get('client_email', 'unknown')}")
         else:
+            logger.warning("⚠️ No GCP credentials found, using default")
             self.storage_client = storage.Client()
         
         self.bucket = self.storage_client.bucket(bucket_name)
