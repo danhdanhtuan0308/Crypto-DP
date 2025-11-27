@@ -117,12 +117,22 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # Search for TODAY's data first (more specific)
-        now = datetime.now(timezone.utc)
-        today_prefix = f"year={now.year}/month={now.month:02d}/day={now.day:02d}/"
+        # Search for TODAY's data first (more specific) - use UTC for GCS path
+        now_utc = datetime.now(timezone.utc)
+        today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
         
-        st.sidebar.warning(f"🔍 Searching for today's files: {today_prefix}...")
-        blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=100))
+        # Also try current hour specifically
+        current_hour_prefix = f"{today_prefix}hour={now_utc.hour:02d}/"
+        
+        st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+        st.sidebar.warning(f"🔍 Searching: {today_prefix}...")
+        
+        # First try current hour, then fallback to whole day
+        blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
+        if len(blobs) < max_files:
+            # Get more from today
+            all_today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=200))
+            blobs = all_today_blobs
         
         if not blobs:
             st.error(f"❌ No data found for today: gs://{BUCKET_NAME}/{today_prefix}")
