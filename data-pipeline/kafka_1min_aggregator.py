@@ -109,9 +109,22 @@ class MinuteAggregator:
         high_24h = latest_data.get('high_24h', 0)
         low_24h = latest_data.get('low_24h', 0)
         
-        # VOLATILITY: sqrt(sum(price_change_percent_1s^2))
-        price_changes = [d.get('price_change_percent_1s', 0) for d in self.window_data]
-        volatility_1m = math.sqrt(sum(pc * pc for pc in price_changes))
+        # VOLATILITY: Standard deviation of 1-second price returns
+        # Calculate price returns (percentage change between consecutive prices)
+        price_returns = []
+        for i in range(1, len(prices)):
+            if prices[i-1] > 0:
+                ret = ((prices[i] - prices[i-1]) / prices[i-1]) * 100
+                price_returns.append(ret)
+        
+        # Volatility = standard deviation of returns
+        if price_returns and len(price_returns) > 1:
+            mean_return = sum(price_returns) / len(price_returns)
+            variance = sum((r - mean_return) ** 2 for r in price_returns) / len(price_returns)
+            volatility_1m = math.sqrt(variance)
+        else:
+            # Fallback: use high-low range as volatility proxy
+            volatility_1m = ((high_price - low_price) / open_price * 100) if open_price > 0 else 0
         
         # ORDER IMBALANCE RATIO: (BuyVol - SellVol) / (BuyVol + SellVol)
         total_volume_traded = total_buy_volume + total_sell_volume
