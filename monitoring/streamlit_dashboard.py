@@ -30,13 +30,15 @@ lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 24, 6)
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
-PREFIX = 'btc_1min_agg/'
+PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
+GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 @st.cache_data(ttl=60)  # Cache for 60 seconds
 def load_data_from_gcs():
     """Load latest parquet files from GCS"""
     try:
-        client = storage.Client()
+        # Initialize client with project ID
+        client = storage.Client(project=GCP_PROJECT_ID)
         bucket = client.bucket(BUCKET_NAME)
         
         # List all blobs with prefix
@@ -283,7 +285,8 @@ if df is not None and not df.empty:
 
 else:
     st.error("No data available. Please check your GCS bucket and ensure data is being written.")
-    st.info(f"Looking for data in: gs://{BUCKET_NAME}/{PREFIX}")
+    st.info(f"Looking for data in: gs://{BUCKET_NAME}/{PREFIX}**/")
+    st.info("Expected structure: gs://crypto-db-east1/year=2025/month=11/day=27/hour=04/*.parquet")
     
     # Retry button
     if st.button("Retry"):
