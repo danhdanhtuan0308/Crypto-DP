@@ -26,7 +26,7 @@ st.markdown("Real-time cryptocurrency data aggregated every minute")
 # Sidebar configuration
 st.sidebar.header("Settings")
 refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
-lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 24, 6)
+lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 6, 1)  # Default to 1 hour for faster loading
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
@@ -50,8 +50,10 @@ def load_data_from_gcs():
             client = storage.Client(project=GCP_PROJECT_ID)
         bucket = client.bucket(BUCKET_NAME)
         
-        # List all blobs with prefix
-        blobs = list(bucket.list_blobs(prefix=PREFIX))
+        # List all blobs with prefix (limit to recent files only)
+        # Use max_results to avoid loading ALL files
+        max_files = lookback_hours * 60  # 1 file per minute
+        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=max_files * 2))
         
         if not blobs:
             st.error(f"No data found in gs://{BUCKET_NAME}/{PREFIX}")
@@ -59,21 +61,23 @@ def load_data_from_gcs():
         
         # Sort by creation time and get latest files
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        
-        # Read latest N files (based on lookback period)
-        max_files = lookback_hours * 60  # 1 file per minute
         latest_blobs = blobs_sorted[:max_files]
         
-        # Read parquet files
+        # Read parquet files (limit to avoid timeout)
         dfs = []
-        for blob in latest_blobs:
-            try:
-                # Read parquet from GCS
-                df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
-                dfs.append(df)
-            except Exception as e:
-                st.warning(f"Error reading {blob.name}: {e}")
-                continue
+        with st.spinner(f'Loading {len(latest_blobs)} files from GCS...'):
+            for i, blob in enumerate(latest_blobs):
+                try:
+                    # Read parquet from GCS
+                    df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
+                    dfs.append(df)
+                    
+                    # Show progress
+                    if (i + 1) % 20 == 0:
+                        st.sidebar.text(f"Loaded {i + 1}/{len(latest_blobs)} files...")
+                except Exception as e:
+                    # Silently skip bad files
+                    continue
         
         if not dfs:
             st.error("No valid parquet files found")
