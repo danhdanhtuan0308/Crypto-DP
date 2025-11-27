@@ -9,7 +9,8 @@ from google.cloud import storage
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import pytz
 
 # Page configuration
 st.set_page_config(
@@ -65,6 +66,9 @@ BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
+# Eastern Time Zone
+EASTERN = pytz.timezone('America/New_York')
+
 @st.cache_data(ttl=20)  # Cache for 20 seconds for more frequent updates
 def load_data_from_gcs(current_minute, max_files, timeline):
     """Load latest parquet files from GCS
@@ -109,7 +113,7 @@ def load_data_from_gcs(current_minute, max_files, timeline):
         bucket = client.bucket(BUCKET_NAME)
         
         # Search for TODAY's data first (more specific)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         today_prefix = f"year={now.year}/month={now.month:02d}/day={now.day:02d}/"
         
         st.sidebar.warning(f"🔍 Searching for today's files: {today_prefix}...")
@@ -199,7 +203,7 @@ with st.spinner("Loading latest data from GCS..."):
 
 if df_full is not None and not df_full.empty:
     # Filter data by selected timeframe
-    now = datetime.now()
+    now = datetime.now(EASTERN)
     
     # Calculate cutoff time based on timeline selection
     if timeline_option == "5 Minutes":
@@ -229,9 +233,9 @@ if df_full is not None and not df_full.empty:
     
     # Display last update time
     last_update = df['window_start'].max()
-    data_age_seconds = (datetime.now() - last_update.replace(tzinfo=None)).total_seconds()
+    data_age_seconds = (datetime.now(EASTERN) - last_update.replace(tzinfo=None)).total_seconds()
     
-    st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+    st.sidebar.success(f"Last Data: {last_update.strftime('%Y-%m-%d %H:%M:%S')} ET")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
@@ -317,7 +321,7 @@ if df_full is not None and not df_full.empty:
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig_price, use_container_width=True)
+    st.plotly_chart(fig_price, width='stretch')
     
     # Chart 2: Volume Analysis
     st.subheader("📊 Volume Analysis")
@@ -350,7 +354,7 @@ if df_full is not None and not df_full.empty:
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=1, col=1)
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=2, col=1)
     
-    st.plotly_chart(fig_volume, use_container_width=True)
+    st.plotly_chart(fig_volume, width='stretch')
     
     # Chart 3: Advanced Metrics
     st.subheader("🔬 Advanced Metrics")
@@ -395,7 +399,7 @@ if df_full is not None and not df_full.empty:
     fig_metrics.update_yaxes(title_text="Volatility", row=1, col=1)
     fig_metrics.update_yaxes(title_text="Ratio", row=2, col=1)
     
-    st.plotly_chart(fig_metrics, use_container_width=True)
+    st.plotly_chart(fig_metrics, width='stretch')
     
     # Data Table
     st.subheader("📋 Recent Data")
@@ -416,7 +420,7 @@ if df_full is not None and not df_full.empty:
         'price_change_percent_1m': 'Change %'
     })
     
-    st.dataframe(display_df.iloc[::-1], use_container_width=True)
+    st.dataframe(display_df.iloc[::-1], width='stretch')
     
     # Statistics
     st.subheader("📊 Statistics (Last 24h)")
