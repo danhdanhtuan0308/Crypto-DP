@@ -29,7 +29,7 @@ refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 15, 120, 30) 
 lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 6, 1)  # Default to 1 hour for faster loading
 
 # IMPORTANT: Limit file loading for performance
-MAX_FILES = 20  # Only load last 20 minutes of data (much faster!)
+MAX_FILES = 5  # Only load last 5 files for fast testing!
 
 # Force cache invalidation by including current time bucket
 current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
@@ -76,37 +76,39 @@ def load_data_from_gcs(current_minute):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # List recent blobs only (MUCH faster than loading all)
-        # Limit to MAX_FILES to avoid timeout
-        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=MAX_FILES * 2))
+        # List recent blobs (minimal for testing)
+        st.sidebar.warning(f"🔍 Searching for files in bucket...")
+        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=10))
         
         if not blobs:
-            st.error(f"No data found in gs://{BUCKET_NAME}/{PREFIX}")
-            st.info("Check that your pipeline is writing data to GCS")
+            st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
+            st.info("🔎 Check that your pipeline is writing data to GCS")
+            st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/...")
             return None
         
-        # Sort by creation time and get latest files ONLY
+        # Sort and take only most recent files
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        latest_blobs = blobs_sorted[:MAX_FILES]  # Only take the most recent files
+        latest_blobs = blobs_sorted[:MAX_FILES]
         
-        st.sidebar.info(f"📥 Loading {len(latest_blobs)} most recent files...")
+        st.sidebar.success(f"✅ Found {len(blobs)} files, loading {len(latest_blobs)}...")
         
-        # Read parquet files with progress bar
+        # Read parquet files with detailed progress
         dfs = []
+        progress_text = st.sidebar.empty()
         progress_bar = st.progress(0)
+        
         for i, blob in enumerate(latest_blobs):
             try:
-                # Read parquet from GCS
+                progress_text.text(f"Loading file {i+1}/{len(latest_blobs)}: {blob.name.split('/')[-1]}")
                 df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
                 dfs.append(df)
-                
-                # Update progress
                 progress_bar.progress((i + 1) / len(latest_blobs))
             except Exception as e:
-                # Skip bad files silently
+                st.sidebar.error(f"⚠️ Skipped file: {e}")
                 continue
         
-        progress_bar.empty()  # Remove progress bar when done
+        progress_bar.empty()
+        progress_text.empty()
         
         if not dfs:
             st.error("No valid parquet files found")
