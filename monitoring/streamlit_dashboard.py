@@ -44,16 +44,26 @@ def load_data_from_gcs(current_minute):
         current_minute: Current time bucket to force cache refresh every minute
     """
     try:
-        # Initialize client with credentials from Streamlit secrets or environment
-        if 'gcp_service_account' in st.secrets:
-            # Running on Streamlit Cloud - use secrets
+        # Initialize client with credentials from environment or Streamlit secrets
+        import os
+        
+        # Try environment variable first (Railway, local)
+        creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+        if creds_json:
+            from google.oauth2 import service_account
+            import json
+            creds_dict = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
+        elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+            # Streamlit Cloud - use secrets
             from google.oauth2 import service_account
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         else:
-            # Running locally - use environment variable
+            # Fall back to default credentials (local with GOOGLE_APPLICATION_CREDENTIALS)
             client = storage.Client(project=GCP_PROJECT_ID)
         bucket = client.bucket(BUCKET_NAME)
         
