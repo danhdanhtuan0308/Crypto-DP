@@ -24,6 +24,15 @@ Overview : Data Pipeline from Coinbase Websocket -> Kafka Topic then fan-out to 
    - Organized in hourly folders: `year=YYYY/month=MM/day=DD/hour=HH/`
    - Snappy compression for efficient storage
 
+**Streamlit Dashboard**
+   - Live BTC monitoring with OHLC charts, volume analysis, volatility tracking
+   - Auto-refresh every 60 seconds, displays full day of 1-minute data
+   - Deployed on Railway with parallel file loading from GCS
+
+**Railway Deployment**
+   - Pipeline service: 3 workers (Producer, Aggregator, GCS Writer) + health server
+   - Dashboard service: Streamlit web app
+   - Auto-deploys on git push
+
 ### Next Steps
-- Set up Grafana Websocket Cloud real-time monitoring dashboard
 - Build ML model consumer for dynamic pricing predictions 
