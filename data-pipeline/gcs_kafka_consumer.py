@@ -40,6 +40,10 @@ SOURCE_TOPIC = 'btc_1min_agg'
 GCS_BUCKET = os.getenv('GCS_BUCKET', 'crypto-db-east1')
 GCS_CREDENTIALS_PATH = os.getenv('GCS_CREDENTIALS_PATH')
 
+# Health check settings
+STALE_DATA_THRESHOLD = 90  # seconds without data = stale (should get 1 msg/min)
+HEALTH_CHECK_INTERVAL = 30  # check every 30 seconds
+
 # Set GCS credentials
 if GCS_CREDENTIALS_PATH:
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GCS_CREDENTIALS_PATH
@@ -135,7 +139,8 @@ class ParquetWriter:
             raise
 
 
-def main():
+def run_consumer():
+    """Run the consumer with health monitoring"""
     logger.info("=" * 70)
     logger.info("🚀 GCS Parquet Writer Started")
     logger.info("=" * 70)
@@ -148,13 +153,31 @@ def main():
     consumer.subscribe([SOURCE_TOPIC])
     logger.info(f"Subscribed to {SOURCE_TOPIC}")
     
+    last_message_time = time.time()
+    last_health_check = time.time()
+    
     try:
         while True:
             msg = consumer.poll(1.0)
+            current_time = time.time()
+            
+            # Health check
+            if current_time - last_health_check >= HEALTH_CHECK_INTERVAL:
+                time_since_message = current_time - last_message_time
+                if time_since_message > STALE_DATA_THRESHOLD:
+                    logger.warning(
+                        f"⚠️ No messages for {time_since_message:.0f}s "
+                        f"(threshold: {STALE_DATA_THRESHOLD}s)"
+                    )
+                else:
+                    logger.info(
+                        f"🏥 Health OK | Files written: {writer.file_count} | "
+                        f"Last message: {time_since_message:.0f}s ago"
+                    )
+                last_health_check = current_time
             
             if msg is None:
                 # Check if we should flush due to timeout
-                current_time = time.time()
                 if writer.buffer and (current_time - writer.last_flush) >= writer.flush_interval:
                     logger.info("⏰ Flush interval reached, writing file...")
                     writer.flush()
@@ -168,6 +191,7 @@ def main():
             try:
                 data = json.loads(msg.value().decode('utf-8'))
                 writer.add_record(data)
+                last_message_time = time.time()  # Update last message time
                 logger.debug(f"Added record to buffer (buffer size: {len(writer.buffer)})")
                 
             except json.JSONDecodeError as e:
@@ -183,7 +207,26 @@ def main():
     
     finally:
         consumer.close()
-        logger.info("Shutdown complete")
+        logger.info("Consumer closed")
+
+
+def main():
+    """Main entry point with infinite retry"""
+    retry_count = 0
+    
+    while True:
+        try:
+            retry_count += 1
+            logger.info(f"🚀 Starting GCS consumer (attempt #{retry_count})")
+            run_consumer()
+        except Exception as e:
+            logger.error(f"❌ Error: {e}. Restarting in 10s...")
+            time.sleep(10)
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+            break
+        
+        logger.info("🔄 Restarting consumer...")
 
 
 if __name__ == "__main__":

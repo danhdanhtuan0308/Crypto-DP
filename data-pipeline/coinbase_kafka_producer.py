@@ -34,6 +34,10 @@ KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'BTC-USD')
 COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
 PRODUCT_ID = "BTC-USD"
 
+# Health check settings
+STALE_DATA_THRESHOLD = 30  # seconds without price change = stale
+HEALTH_CHECK_INTERVAL = 10  # check every 10 seconds
+
 
 def delivery_callback(err, msg):
     if err:
@@ -122,6 +126,7 @@ async def receive_websocket_data(websocket, state):
                 is_buy = message.get('side') == 'buy'
                 
                 state['latest_price'] = trade_price
+                state['last_trade_time'] = time.time()  # Update last trade time
                 
                 if is_buy:
                     state['buy_volume_1s'] += trade_size
@@ -139,7 +144,7 @@ async def send_to_kafka_periodically(producer, state):
     """Task to send data to Kafka every 1 second"""
     await asyncio.sleep(2)  # Wait for initial data
     
-    while True:
+    while not state.get('should_reconnect', False):
         start_time = time.time()
         
         if state['latest_ticker'].get('price', 0) > 0:
@@ -236,6 +241,45 @@ async def send_to_kafka_periodically(producer, state):
         await asyncio.sleep(sleep_time)
 
 
+async def health_check(state, websocket):
+    """Monitor data freshness and trigger reconnect if stale"""
+    logger.info("🏥 Health check started")
+    consecutive_stale = 0
+    
+    while not state.get('should_reconnect', False):
+        await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+        
+        current_time = time.time()
+        last_trade_time = state.get('last_trade_time', current_time)
+        time_since_trade = current_time - last_trade_time
+        
+        # Check if we're receiving trades
+        if time_since_trade > STALE_DATA_THRESHOLD:
+            consecutive_stale += 1
+            logger.warning(
+                f"⚠️ STALE DATA: No trades for {time_since_trade:.0f}s "
+                f"(threshold: {STALE_DATA_THRESHOLD}s) - count: {consecutive_stale}"
+            )
+            
+            # After 3 consecutive stale checks, trigger reconnect
+            if consecutive_stale >= 3:
+                logger.error("❌ Data stale for too long - triggering reconnect!")
+                state['should_reconnect'] = True
+                await websocket.close()
+                break
+        else:
+            if consecutive_stale > 0:
+                logger.info(f"✅ Data flowing again - last trade {time_since_trade:.1f}s ago")
+            consecutive_stale = 0
+            
+            # Log health status periodically
+            logger.info(
+                f"🏥 Health OK | Price: ${state.get('latest_price', 0):.2f} | "
+                f"Messages: {state.get('message_count', 0)} | "
+                f"Last trade: {time_since_trade:.1f}s ago"
+            )
+
+
 async def stream_coinbase_to_kafka():
     producer = Producer(KAFKA_CONFIG)
     logger.info(f"Starting Coinbase producer → Topic: {KAFKA_TOPIC}")
@@ -250,7 +294,9 @@ async def stream_coinbase_to_kafka():
         'price_history': deque(maxlen=86400),
         'message_count': 0,
         'high_24h': 0.0,
-        'low_24h': float('inf')
+        'low_24h': float('inf'),
+        'last_trade_time': time.time(),  # Track last trade for health check
+        'should_reconnect': False  # Flag to trigger reconnect
     }
     
     try:
@@ -267,10 +313,11 @@ async def stream_coinbase_to_kafka():
             await websocket.send(json.dumps(subscribe_message))
             logger.info(f"Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches")
             
-            # Run both tasks concurrently
+            # Run all tasks concurrently (receive, send, health check)
             await asyncio.gather(
                 receive_websocket_data(websocket, state),
-                send_to_kafka_periodically(producer, state)
+                send_to_kafka_periodically(producer, state),
+                health_check(state, websocket)
             )
     
     except websockets.exceptions.ConnectionClosed as e:
@@ -295,22 +342,23 @@ def main():
         return
     
     retry_count = 0
-    max_retries = 5
     
-    while retry_count < max_retries:
+    while True:  # Infinite retry - always try to reconnect
         try:
-            asyncio.run(stream_coinbase_to_kafka())
-            break  # Exit if successful
-        except websockets.exceptions.ConnectionClosed:
             retry_count += 1
-            if retry_count < max_retries:
-                logger.warning(f"Connection closed. Retry {retry_count}/{max_retries} in 5s...")
-                time.sleep(5)
-            else:
-                logger.error("Max retries reached. Exiting.")
+            logger.info(f"🚀 Starting Coinbase producer (attempt #{retry_count})")
+            asyncio.run(stream_coinbase_to_kafka())
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.warning(f"⚠️ Connection closed: {e}. Reconnecting in 5s...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"❌ Error: {e}. Reconnecting in 10s...")
+            time.sleep(10)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             break
+        
+        logger.info("🔄 Reconnecting...")
 
 
 if __name__ == "__main__":
