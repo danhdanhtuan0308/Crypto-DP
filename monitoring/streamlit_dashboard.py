@@ -80,17 +80,25 @@ def load_data_from_gcs(current_minute):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # List recent blobs (minimal for testing)
-        st.sidebar.warning(f"🔍 Searching for files in bucket...")
-        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=10))
+        # Search for TODAY's data first (more specific)
+        now = datetime.utcnow()
+        today_prefix = f"year={now.year}/month={now.month:02d}/day={now.day:02d}/"
+        
+        st.sidebar.warning(f"🔍 Searching for today's files: {today_prefix}...")
+        blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=100))
         
         if not blobs:
+            st.error(f"❌ No data found for today: gs://{BUCKET_NAME}/{today_prefix}")
+            st.info("🔎 Trying to find ANY recent data...")
+            # Fallback: search all files
+            blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=50))
+            
+        if not blobs:
             st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
-            st.info("🔎 Check that your pipeline is writing data to GCS")
-            st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/...")
+            st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/day=27/...")
             return None
         
-        # Sort and take only most recent files
+        # Sort by creation time and take only most recent
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
         latest_blobs = blobs_sorted[:MAX_FILES]
         
