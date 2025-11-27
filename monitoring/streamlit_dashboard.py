@@ -54,13 +54,15 @@ def load_data_from_gcs(current_minute):
         # Try environment variable first (Railway, local)
         creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
         
+        # Debug: Check if env var exists
         if creds_json:
+            st.sidebar.success(f"✅ Found GCP_SERVICE_ACCOUNT_JSON ({len(creds_json)} chars)")
             # Using environment variable (Railway/local)
-            st.sidebar.info("🔑 Using GCP_SERVICE_ACCOUNT_JSON env var")
             from google.oauth2 import service_account
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
+            st.sidebar.info(f"🔑 Using service account: {creds_dict.get('client_email', 'unknown')}")
         elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
             # Streamlit Cloud - use secrets
             st.sidebar.info("🔑 Using Streamlit secrets")
@@ -71,7 +73,9 @@ def load_data_from_gcs(current_minute):
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         else:
             # Fall back to default credentials (local with GOOGLE_APPLICATION_CREDENTIALS)
-            st.sidebar.warning("⚠️ Using default GCP credentials")
+            st.sidebar.error("❌ GCP_SERVICE_ACCOUNT_JSON not found!")
+            st.sidebar.error("⚠️ Falling back to default credentials (will likely fail)")
+            st.error("**CONFIGURATION ERROR**: Set GCP_SERVICE_ACCOUNT_JSON in Railway environment variables!")
             client = storage.Client(project=GCP_PROJECT_ID)
         
         bucket = client.bucket(BUCKET_NAME)
