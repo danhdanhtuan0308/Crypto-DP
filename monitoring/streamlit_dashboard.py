@@ -25,11 +25,11 @@ st.markdown("Real-time cryptocurrency data aggregated every minute")
 
 # Sidebar configuration
 st.sidebar.header("Settings")
-refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 15, 120, 30)  # Faster refresh options
-lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 6, 1)  # Default to 1 hour for faster loading
+refresh_interval = 60  # Fixed 60 seconds refresh
+st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 
-# IMPORTANT: Limit file loading for performance
-MAX_FILES = 5  # Only load last 5 files for fast testing!
+# Load full day of data (24 hours * 60 minutes = 1440 files max)
+MAX_FILES = 1440  # Full day of 1-minute data
 
 # Force cache invalidation by including current time bucket
 current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
