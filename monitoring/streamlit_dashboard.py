@@ -22,6 +22,7 @@ st.set_page_config(
 # Title
 st.title("₿ Bitcoin Live Dashboard - 1-Minute Updates")
 st.markdown("Real-time cryptocurrency data aggregated every minute")
+# v2
 
 # Sidebar configuration
 st.sidebar.header("Settings")
