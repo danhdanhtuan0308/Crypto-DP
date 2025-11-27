@@ -22,12 +22,14 @@ st.set_page_config(
 # Title
 st.title("₿ Bitcoin Live Dashboard - 1-Minute Updates")
 st.markdown("Real-time cryptocurrency data aggregated every minute")
-# v2
 
 # Sidebar configuration
 st.sidebar.header("Settings")
 refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 15, 120, 30)  # Faster refresh options
 lookback_hours = st.sidebar.slider("Data Lookback (hours)", 1, 6, 1)  # Default to 1 hour for faster loading
+
+# IMPORTANT: Limit file loading for performance
+MAX_FILES = 20  # Only load last 20 minutes of data (much faster!)
 
 # Force cache invalidation by including current time bucket
 current_minute = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every minute
@@ -74,38 +76,37 @@ def load_data_from_gcs(current_minute):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # Calculate time range for files we need
-        now = datetime.utcnow()
-        start_time = now - timedelta(hours=lookback_hours)
-        
-        # List all blobs with prefix (limit to recent files only)
-        # Use max_results to avoid loading ALL files
-        max_files = lookback_hours * 60  # 1 file per minute
-        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=max_files * 3))
+        # List recent blobs only (MUCH faster than loading all)
+        # Limit to MAX_FILES to avoid timeout
+        blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=MAX_FILES * 2))
         
         if not blobs:
             st.error(f"No data found in gs://{BUCKET_NAME}/{PREFIX}")
+            st.info("Check that your pipeline is writing data to GCS")
             return None
         
-        # Sort by creation time and get latest files
+        # Sort by creation time and get latest files ONLY
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        latest_blobs = blobs_sorted[:max_files]
+        latest_blobs = blobs_sorted[:MAX_FILES]  # Only take the most recent files
         
-        # Read parquet files (limit to avoid timeout)
+        st.sidebar.info(f"📥 Loading {len(latest_blobs)} most recent files...")
+        
+        # Read parquet files with progress bar
         dfs = []
-        with st.spinner(f'Loading {len(latest_blobs)} files from GCS...'):
-            for i, blob in enumerate(latest_blobs):
-                try:
-                    # Read parquet from GCS
-                    df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
-                    dfs.append(df)
-                    
-                    # Show progress
-                    if (i + 1) % 20 == 0:
-                        st.sidebar.text(f"Loaded {i + 1}/{len(latest_blobs)} files...")
-                except Exception as e:
-                    # Silently skip bad files
-                    continue
+        progress_bar = st.progress(0)
+        for i, blob in enumerate(latest_blobs):
+            try:
+                # Read parquet from GCS
+                df = pd.read_parquet(f'gs://{BUCKET_NAME}/{blob.name}')
+                dfs.append(df)
+                
+                # Update progress
+                progress_bar.progress((i + 1) / len(latest_blobs))
+            except Exception as e:
+                # Skip bad files silently
+                continue
+        
+        progress_bar.empty()  # Remove progress bar when done
         
         if not dfs:
             st.error("No valid parquet files found")
