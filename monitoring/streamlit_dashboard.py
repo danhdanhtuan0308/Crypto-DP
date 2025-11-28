@@ -61,28 +61,21 @@ timeline_option = st.sidebar.radio(
 # Save selection to session state
 st.session_state.selected_timeline = timeline_option
 
-# Force cache invalidation by including current time bucket (changes every 60 seconds = once per minute)
-# This way, switching timelines within the same minute uses cached data
-current_time_bucket = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every 60 seconds
-
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-@st.cache_data(ttl=60)  # Cache for 60 seconds (1 minute)
-def load_data_from_gcs(time_bucket):
+@st.cache_data(ttl=60)  # Cache for 60 seconds (1 minute) - auto refreshes
+def load_data_from_gcs():
     """Load latest parquet files from GCS
-    
-    Args:
-        time_bucket: Current time bucket to force cache refresh every 60 seconds
     
     Returns:
         DataFrame with all loaded data (will be filtered by caller based on timeline)
     
     Note: Loads ~24 hours of data and caches it for 60 seconds. Switching timelines
-    within that minute just filters cached data in memory, avoiding expensive re-downloads.
-    Cache refreshes every minute to get new data.
+    just filters cached data in memory, avoiding expensive re-downloads.
+    Cache auto-refreshes every 60 seconds via TTL to get new data.
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -225,11 +218,11 @@ def load_data_from_gcs(time_bucket):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - cached by time_bucket only, not by timeline
-# This means switching timelines won't reload data, just filter differently
+# Load data - cached with TTL, not dependent on any parameter
+# This means switching timelines uses cached data, only reloads when TTL expires
 load_start = time.time()
 with st.spinner("Loading latest data from GCS..."):
-    df_full = load_data_from_gcs(current_time_bucket)
+    df_full = load_data_from_gcs()
 load_time = time.time() - load_start
 
 if df_full is not None and not df_full.empty:
@@ -492,16 +485,13 @@ if df_full is not None and not df_full.empty:
         st.write(f"Max: {df['volatility_1m'].max():.4f}")
         st.write(f"Current: {latest['volatility_1m']:.4f}")
     
-    # Auto-refresh with countdown
+    # Auto-refresh info (no countdown to avoid constant reruns)
     st.sidebar.markdown("---")
-    countdown_placeholder = st.sidebar.empty()
+    st.sidebar.info(f"🔄 Auto-refresh: Every {refresh_interval} seconds")
+    st.sidebar.caption("Change timeline to see instant filtering with cached data!")
     
-    # Countdown timer
-    for remaining in range(refresh_interval, 0, -1):
-        countdown_placeholder.write(f"🔄 Refreshing in {remaining} seconds...")
-        time.sleep(1)
-    
-    countdown_placeholder.write("🔄 Refreshing now...")
+    # Simple auto-refresh without countdown (avoids constant page reruns)
+    time.sleep(refresh_interval)
     st.rerun()
 
 else:
