@@ -21,6 +21,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS to prevent text shadows and duplicates
+st.markdown("""
+    <style>
+    /* Prevent text shadows and duplicates */
+    .stMarkdown, .stText, .stCaption {
+        text-shadow: none !important;
+    }
+    /* Ensure no duplicate rendering */
+    [data-testid="stMarkdownContainer"] {
+        opacity: 1 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Eastern Time Zone - ALL times are in EST
 EASTERN = pytz.timezone('America/New_York')
 
@@ -506,6 +520,48 @@ if df_full is not None and not df_full.empty:
     
     st.plotly_chart(fig_metrics, width='stretch')
     
+    # Chart 4: Trade Count Analysis
+    st.subheader("📊 Trade Count Analysis")
+    
+    # Check if trade_count_1m column exists
+    if 'trade_count_1m' in df.columns:
+        fig_trades = go.Figure()
+        
+        # Add bar chart for trade counts
+        fig_trades.add_trace(
+            go.Bar(
+                x=df['window_start'],
+                y=df['trade_count_1m'],
+                name='Trade Count',
+                marker_color='purple',
+                hovertemplate='<b>Time</b>: %{x}<br><b>Trades</b>: %{y}<extra></extra>'
+            )
+        )
+        
+        # Add a line for moving average (if enough data points)
+        if len(df) >= 5:
+            df['trade_count_ma'] = df['trade_count_1m'].rolling(window=5, min_periods=1).mean()
+            fig_trades.add_trace(
+                go.Scatter(
+                    x=df['window_start'],
+                    y=df['trade_count_ma'],
+                    name='5-Min Moving Avg',
+                    line=dict(color='orange', width=2, dash='dash')
+                )
+            )
+        
+        fig_trades.update_layout(
+            xaxis_title="Time (EST)",
+            yaxis_title="Number of Trades",
+            height=400,
+            hovermode='x unified',
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_trades, width='stretch')
+    else:
+        st.info("Trade count data not available in the current dataset")
+    
     # Data Table
     st.subheader("📋 Recent Data")
     
@@ -527,7 +583,8 @@ if df_full is not None and not df_full.empty:
     
     st.dataframe(display_df.iloc[::-1], width='stretch')
     
-    # Statistics
+    # Statistics section with clear separator
+    st.markdown("---")
     st.subheader("📊 Statistics (Last 24h)")
     
     col1, col2, col3 = st.columns(3)
