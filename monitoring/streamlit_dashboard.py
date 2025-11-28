@@ -61,26 +61,28 @@ timeline_option = st.sidebar.radio(
 # Save selection to session state
 st.session_state.selected_timeline = timeline_option
 
-# Force cache invalidation by including current time bucket (changes every 10 seconds)
-current_time_bucket = datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-1]  # Changes every 10 seconds
+# Force cache invalidation by including current time bucket (changes every 60 seconds = once per minute)
+# This way, switching timelines within the same minute uses cached data
+current_time_bucket = datetime.now().strftime("%Y-%m-%d %H:%M")  # Changes every 60 seconds
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-@st.cache_data(ttl=10)  # Cache for 10 seconds for more frequent updates
+@st.cache_data(ttl=60)  # Cache for 60 seconds (1 minute)
 def load_data_from_gcs(time_bucket):
     """Load latest parquet files from GCS
     
     Args:
-        time_bucket: Current time bucket to force cache refresh every 10 seconds
+        time_bucket: Current time bucket to force cache refresh every 60 seconds
     
     Returns:
         DataFrame with all loaded data (will be filtered by caller based on timeline)
     
-    Note: Loads ~24 hours of data and caches it. Switching timelines just filters
-    this cached data in memory, avoiding expensive re-downloads.
+    Note: Loads ~24 hours of data and caches it for 60 seconds. Switching timelines
+    within that minute just filters cached data in memory, avoiding expensive re-downloads.
+    Cache refreshes every minute to get new data.
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
