@@ -32,9 +32,11 @@ st.markdown("Real-time cryptocurrency data aggregated every minute")
 now_est = datetime.now(EASTERN)
 st.markdown(f"**🕐 Current Time (EST):** {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# Initialize session state for timeline persistence
+# Initialize session state for timeline persistence and last refresh time
 if 'selected_timeline' not in st.session_state:
     st.session_state.selected_timeline = "1 Day"
+if 'last_refresh_time' not in st.session_state:
+    st.session_state.last_refresh_time = time.time()
 
 # Sidebar configuration
 st.sidebar.header("Settings")
@@ -73,8 +75,8 @@ def load_data_from_gcs():
     Returns:
         DataFrame with all loaded data (will be filtered by caller based on timeline)
     
-    Note: Loads ~24 hours of data and caches it for 60 seconds. Switching timelines
-    just filters cached data in memory, avoiding expensive re-downloads.
+    Note: On first load, gets all data from today+yesterday (~1400 files).
+    On refresh, only loads files from last 2 hours (incremental) to be fast.
     Cache auto-refreshes every 60 seconds via TTL to get new data.
     """
     try:
@@ -117,26 +119,27 @@ def load_data_from_gcs():
         # For longer timeframes, we need to load from previous day(s) too
         blobs = []
         
-        # ALWAYS load from today + yesterday to support all timeframes
-        # This way we load once and filter in memory, avoiding re-downloads on timeline switch
-        today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
-        yesterday_est = now_est - timedelta(days=1)
-        yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
-        
+        # Smart loading: Load only last 2 hours for faster refresh
+        # This gives us enough data for all timeframes while being fast
         st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
-        st.sidebar.warning(f"🔍 Loading: {today_prefix} + yesterday...")
         
-        # Load from both days - this gets cached
-        today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
-        yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
-        blobs = today_blobs + yesterday_blobs
-        st.sidebar.info(f"📅 Today: {len(today_blobs)} files, Yesterday: {len(yesterday_blobs)} files")
+        # Load current hour and previous 2 hours
+        blobs = []
+        for hours_back in range(3):  # 0, 1, 2 hours back
+            hour_time = now_est - timedelta(hours=hours_back)
+            hour_prefix = f"year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
+            hour_blobs = list(bucket.list_blobs(prefix=hour_prefix, max_results=100))
+            blobs.extend(hour_blobs)
+            if hours_back == 0:
+                st.sidebar.text(f"📁 Current hour: {len(hour_blobs)} files")
+        
+        st.sidebar.info(f"✅ Total files found: {len(blobs)} (last 3 hours)")
         
         if not blobs:
-            st.error(f"❌ No data found for today: gs://{BUCKET_NAME}/{today_prefix}")
-            st.info("🔎 Trying to find ANY recent data...")
-            # Fallback: search all files
-            blobs = list(bucket.list_blobs(prefix=PREFIX, max_results=50))
+            # Fallback: try loading from entire today if no data in last 3 hours
+            today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
+            st.warning(f"⚠️ No data in last 3 hours, loading full day: {today_prefix}")
+            blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
             
         if not blobs:
             st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
@@ -485,14 +488,28 @@ if df_full is not None and not df_full.empty:
         st.write(f"Max: {df['volatility_1m'].max():.4f}")
         st.write(f"Current: {latest['volatility_1m']:.4f}")
     
-    # Auto-refresh info (no countdown to avoid constant reruns)
+    # Auto-refresh logic using session state
     st.sidebar.markdown("---")
-    st.sidebar.info(f"🔄 Auto-refresh: Every {refresh_interval} seconds")
-    st.sidebar.caption("Change timeline to see instant filtering with cached data!")
     
-    # Simple auto-refresh without countdown (avoids constant page reruns)
-    time.sleep(refresh_interval)
-    st.rerun()
+    # Check if it's time to refresh
+    current_time = time.time()
+    time_since_refresh = current_time - st.session_state.last_refresh_time
+    
+    if time_since_refresh >= refresh_interval:
+        # Time to refresh
+        st.session_state.last_refresh_time = current_time
+        st.sidebar.info("🔄 Refreshing now...")
+        time.sleep(0.1)
+        st.rerun()
+    else:
+        # Show countdown
+        remaining = int(refresh_interval - time_since_refresh)
+        st.sidebar.info(f"🔄 Next refresh in {remaining} seconds")
+        st.sidebar.caption("💡 Switch timelines instantly - uses cached data!")
+        
+        # Rerun after 1 second to update countdown
+        time.sleep(1)
+        st.rerun()
 
 else:
     st.error("No data available. Please check your GCS bucket and ensure data is being written.")
