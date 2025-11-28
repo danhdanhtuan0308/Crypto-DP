@@ -117,22 +117,32 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # Search for TODAY's data first (more specific) - use UTC for GCS path
+        # Calculate date range based on timeline - need to load data from correct time range
         now_utc = datetime.now(timezone.utc)
-        today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
         
-        # Also try current hour specifically
-        current_hour_prefix = f"{today_prefix}hour={now_utc.hour:02d}/"
+        # For longer timeframes, we need to load from previous day(s) too
+        blobs = []
         
-        st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
-        st.sidebar.warning(f"🔍 Searching: {today_prefix}...")
-        
-        # First try current hour, then fallback to whole day
-        blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
-        if len(blobs) < max_files:
-            # Get more from today
-            all_today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=200))
-            blobs = all_today_blobs
+        if timeline in ["1 Hour", "30 Minutes", "15 Minutes", "5 Minutes"]:
+            # Only need today's data
+            today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
+            st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+            st.sidebar.warning(f"🔍 Searching: {today_prefix}...")
+            blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=200))
+        else:
+            # 1 Day - need today AND yesterday
+            today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
+            yesterday = now_utc - timedelta(days=1)
+            yesterday_prefix = f"year={yesterday.year}/month={yesterday.month:02d}/day={yesterday.day:02d}/"
+            
+            st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+            st.sidebar.warning(f"🔍 Searching: {today_prefix} + {yesterday_prefix}...")
+            
+            # Load from both days
+            today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
+            yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
+            blobs = today_blobs + yesterday_blobs
+            st.sidebar.info(f"📅 Today: {len(today_blobs)} files, Yesterday: {len(yesterday_blobs)} files")
         
         if not blobs:
             st.error(f"❌ No data found for today: gs://{BUCKET_NAME}/{today_prefix}")
@@ -239,24 +249,31 @@ if df_full is not None and not df_full.empty:
     # Convert window_start from UTC to Eastern time for comparison
     df_full['window_start_et'] = pd.to_datetime(df_full['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
     cutoff_time_naive = cutoff_time.replace(tzinfo=None)
+    
+    # Debug: show data range in ET
+    st.sidebar.text(f"DEBUG: Data min ET: {df_full['window_start_et'].min().strftime('%H:%M:%S')}")
+    st.sidebar.text(f"DEBUG: Data max ET: {df_full['window_start_et'].max().strftime('%H:%M:%S')}")
+    
     df = df_full[df_full['window_start_et'] >= cutoff_time_naive].copy()
     
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
         df = df_full.copy()
+        # Also convert window_start for fallback case
+        if 'window_start_et' not in df.columns:
+            df['window_start_et'] = pd.to_datetime(df['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
     
     # Use Eastern time for all displays
     df['window_start'] = df['window_start_et']
     
     st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
     
-    # Display last update time - convert UTC to Eastern
-    last_update_utc = df['window_start'].max()
-    last_update_eastern = pd.Timestamp(last_update_utc).tz_localize('UTC').tz_convert(EASTERN)
-    now_eastern = datetime.now(EASTERN)
-    data_age_seconds = (now_eastern - last_update_eastern).total_seconds()
+    # Display last update time - already in Eastern (naive), just display it
+    last_update_et = df['window_start'].max()
+    now_eastern = datetime.now(EASTERN).replace(tzinfo=None)
+    data_age_seconds = (now_eastern - pd.Timestamp(last_update_et).to_pydatetime()).total_seconds()
     
-    st.sidebar.success(f"Last Data: {last_update_eastern.strftime('%Y-%m-%d %H:%M:%S')} ET")
+    st.sidebar.success(f"Last Data: {last_update_et.strftime('%Y-%m-%d %H:%M:%S')} ET")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
