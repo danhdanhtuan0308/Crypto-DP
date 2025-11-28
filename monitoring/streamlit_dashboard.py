@@ -211,9 +211,15 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         # Combine all dataframes
         combined_df = pd.concat(dfs, ignore_index=True)
         
-        # Convert timestamps
-        combined_df['window_start'] = pd.to_datetime(combined_df['window_start'], unit='ms')
-        combined_df['window_end'] = pd.to_datetime(combined_df['window_end'], unit='ms')
+        # Convert timestamps from UTC milliseconds to EST datetime
+        # The aggregator stores window_start as UTC Unix timestamp in milliseconds
+        # We need to convert to EST for proper comparison with current time
+        combined_df['window_start'] = pd.to_datetime(combined_df['window_start'], unit='ms', utc=True)
+        combined_df['window_end'] = pd.to_datetime(combined_df['window_end'], unit='ms', utc=True)
+        
+        # Convert from UTC to EST
+        combined_df['window_start'] = combined_df['window_start'].dt.tz_convert(EASTERN)
+        combined_df['window_end'] = combined_df['window_end'].dt.tz_convert(EASTERN)
         
         # Sort by timestamp
         combined_df = combined_df.sort_values('window_start', ascending=True)
@@ -233,7 +239,7 @@ with st.spinner("Loading latest data from GCS..."):
 
 if df_full is not None and not df_full.empty:
     # Filter data by selected timeframe - ALL IN EASTERN TIME
-    now_est = datetime.now(EASTERN).replace(tzinfo=None)  # Naive EST
+    now_est = datetime.now(EASTERN)  # Keep timezone aware
     
     # Calculate cutoff time based on timeline selection (EST)
     if timeline_option == "5 Minutes":
@@ -247,11 +253,8 @@ if df_full is not None and not df_full.empty:
     else:  # 1 Day
         cutoff_time = now_est - timedelta(hours=24)
     
-    # Convert window_start from Unix timestamp (milliseconds) to datetime
-    # The aggregator stores window_start as EST timestamp in milliseconds
-    df_full['window_start'] = pd.to_datetime(df_full['window_start'], unit='ms')
-    
-    # Filter data
+    # The data is already timezone-aware (EST) from load_data_from_gcs
+    # Filter data - window_start is already EST timezone-aware
     df = df_full[df_full['window_start'] >= cutoff_time].copy()
     
     if df.empty:
@@ -262,9 +265,13 @@ if df_full is not None and not df_full.empty:
     
     # Display last update time - in EST
     last_update_est = df['window_start'].max()
-    data_age_seconds = (now_est - pd.Timestamp(last_update_est).to_pydatetime()).total_seconds()
+    # Convert now_est to pandas Timestamp for proper comparison
+    now_est_ts = pd.Timestamp(now_est)
+    data_age_seconds = (now_est_ts - last_update_est).total_seconds()
     
-    st.sidebar.success(f"Last Data: {last_update_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    # Format for display (remove timezone info for cleaner display)
+    last_update_display = last_update_est.strftime('%Y-%m-%d %H:%M:%S')
+    st.sidebar.success(f"Last Data: {last_update_display} EST")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
