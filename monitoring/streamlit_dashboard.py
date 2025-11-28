@@ -384,6 +384,7 @@ if df_full is not None and not df_full.empty:
             st.metric(
                 label="Volatility (1m)",
                 value=f"{latest['volatility_1m']:.4f}",
+                help=f"Regime: {latest.get('volatility_regime', 'N/A').upper()}"
             )
         
         with col3:
@@ -410,10 +411,70 @@ if df_full is not None and not df_full.empty:
                 value=f"{latest.get('trade_count_1m', 0):.0f}",
             )
         
-        # Second row of metrics
-        col7, col8, col9 = st.columns(3)
+        # Second row of microstructure metrics
+        st.markdown("### 📊 Market Microstructure Metrics")
+        col7, col8, col9, col10, col11 = st.columns(5)
         
         with col7:
+            st.metric(
+                label="Bid-Ask Spread",
+                value=f"${latest.get('avg_bid_ask_spread_1m', 0):.4f}",
+                help="Average spread between best bid and ask"
+            )
+        
+        with col8:
+            st.metric(
+                label="CVD (1m)",
+                value=f"{latest.get('cvd_1m', 0):.4f}",
+                help="Cumulative Volume Delta (buy vol - sell vol)"
+            )
+        
+        with col9:
+            st.metric(
+                label="OFI (Total)",
+                value=f"{latest.get('total_ofi_1m', 0):.2f}",
+                help="Order Flow Imbalance (bid depth changes - ask depth changes)"
+            )
+        
+        with col10:
+            st.metric(
+                label="Kyle's Lambda",
+                value=f"{latest.get('avg_kyles_lambda_1m', 0):.2f}",
+                help="Price impact per unit volume (market depth)"
+            )
+        
+        with col11:
+            st.metric(
+                label="Liquidity Health",
+                value=f"{latest.get('avg_liquidity_health_1m', 0):.2f}",
+                help="Total depth at top of book (bids + asks)"
+            )
+        
+        # Third row - additional microstructure metrics
+        col12, col13, col14, col15 = st.columns(4)
+        
+        with col12:
+            st.metric(
+                label="VWAP (1m)",
+                value=f"${latest.get('avg_vwap_1m', 0):,.2f}",
+                help="Volume-Weighted Average Price"
+            )
+        
+        with col13:
+            st.metric(
+                label="Mid-Price",
+                value=f"${latest.get('avg_mid_price_1m', 0):,.2f}",
+                help="Average of best bid and ask"
+            )
+        
+        with col14:
+            st.metric(
+                label="Micro-Price Dev",
+                value=f"{latest.get('avg_micro_price_deviation_1m', 0):.4f}",
+                help="Deviation from volume-weighted mid-price"
+            )
+        
+        with col15:
             st.metric(
                 label="Order Imbalance",
                 value=f"{latest['order_imbalance_ratio_1m']:.4f}",
@@ -562,6 +623,229 @@ if df_full is not None and not df_full.empty:
     else:
         st.info("Trade count data not available in the current dataset")
     
+    # Chart 5: Microstructure Metrics - Spread & Depth
+    st.subheader("📏 Bid-Ask Spread & Order Book Depth")
+    
+    fig_spread_depth = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("Bid-Ask Spread ($)", "Order Book Depth (2% levels)"),
+        vertical_spacing=0.15,
+        row_heights=[0.5, 0.5]
+    )
+    
+    # Bid-Ask Spread
+    if 'avg_bid_ask_spread_1m' in df.columns:
+        fig_spread_depth.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_bid_ask_spread_1m'],
+                mode='lines+markers',
+                name='Bid-Ask Spread',
+                line=dict(color='blue', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(0, 100, 255, 0.2)'
+            ),
+            row=1, col=1
+        )
+    
+    # Order Book Depth (Bid vs Ask)
+    if 'avg_bid_depth_2pct_1m' in df.columns and 'avg_ask_depth_2pct_1m' in df.columns:
+        fig_spread_depth.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_bid_depth_2pct_1m'],
+                mode='lines',
+                name='Bid Depth',
+                line=dict(color='green', width=2),
+                stackgroup='depth'
+            ),
+            row=2, col=1
+        )
+        fig_spread_depth.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_ask_depth_2pct_1m'],
+                mode='lines',
+                name='Ask Depth',
+                line=dict(color='red', width=2),
+                stackgroup='depth'
+            ),
+            row=2, col=1
+        )
+    
+    fig_spread_depth.update_layout(height=600, showlegend=True, hovermode='x unified')
+    fig_spread_depth.update_xaxes(title_text="Time (EST)", row=2, col=1)
+    fig_spread_depth.update_yaxes(title_text="Spread ($)", row=1, col=1)
+    fig_spread_depth.update_yaxes(title_text="Depth (BTC)", row=2, col=1)
+    
+    st.plotly_chart(fig_spread_depth, width='stretch')
+    
+    # Chart 6: Price Metrics - VWAP, Mid-Price, Close
+    st.subheader("💰 Price Comparison: VWAP vs Mid-Price vs Close")
+    
+    fig_prices = go.Figure()
+    
+    if 'avg_vwap_1m' in df.columns:
+        fig_prices.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_vwap_1m'],
+                mode='lines',
+                name='VWAP',
+                line=dict(color='blue', width=2, dash='dot')
+            )
+        )
+    
+    if 'avg_mid_price_1m' in df.columns:
+        fig_prices.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_mid_price_1m'],
+                mode='lines',
+                name='Mid-Price',
+                line=dict(color='green', width=2, dash='dash')
+            )
+        )
+    
+    fig_prices.add_trace(
+        go.Scatter(
+            x=df['window_start'],
+            y=df['close'],
+            mode='lines',
+            name='Close Price',
+            line=dict(color='orange', width=2)
+        )
+    )
+    
+    fig_prices.update_layout(
+        xaxis_title="Time (EST)",
+        yaxis_title="Price ($)",
+        height=400,
+        hovermode='x unified',
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig_prices, width='stretch')
+    
+    # Chart 7: CVD & OFI (Order Flow)
+    st.subheader("🌊 Order Flow: CVD & OFI")
+    
+    fig_flow = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("Cumulative Volume Delta (CVD)", "Order Flow Imbalance (OFI)"),
+        vertical_spacing=0.15,
+        row_heights=[0.5, 0.5]
+    )
+    
+    # CVD
+    if 'cvd_1m' in df.columns:
+        colors_cvd = ['green' if val > 0 else 'red' for val in df['cvd_1m']]
+        fig_flow.add_trace(
+            go.Bar(
+                x=df['window_start'],
+                y=df['cvd_1m'],
+                name='CVD',
+                marker_color=colors_cvd
+            ),
+            row=1, col=1
+        )
+        fig_flow.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
+    
+    # OFI
+    if 'total_ofi_1m' in df.columns:
+        colors_ofi = ['green' if val > 0 else 'red' for val in df['total_ofi_1m']]
+        fig_flow.add_trace(
+            go.Bar(
+                x=df['window_start'],
+                y=df['total_ofi_1m'],
+                name='OFI',
+                marker_color=colors_ofi
+            ),
+            row=2, col=1
+        )
+        fig_flow.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+    
+    fig_flow.update_layout(height=600, showlegend=True, hovermode='x unified')
+    fig_flow.update_xaxes(title_text="Time (EST)", row=2, col=1)
+    fig_flow.update_yaxes(title_text="CVD (BTC)", row=1, col=1)
+    fig_flow.update_yaxes(title_text="OFI", row=2, col=1)
+    
+    st.plotly_chart(fig_flow, width='stretch')
+    
+    # Chart 8: Market Quality - Kyle's Lambda & Liquidity Health
+    st.subheader("🏥 Market Quality: Price Impact & Liquidity")
+    
+    fig_quality = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("Kyle's Lambda (Price Impact)", "Liquidity Health Score"),
+        vertical_spacing=0.15,
+        row_heights=[0.5, 0.5]
+    )
+    
+    # Kyle's Lambda
+    if 'avg_kyles_lambda_1m' in df.columns:
+        fig_quality.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_kyles_lambda_1m'],
+                mode='lines+markers',
+                name="Kyle's Lambda",
+                line=dict(color='purple', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(128, 0, 128, 0.2)'
+            ),
+            row=1, col=1
+        )
+    
+    # Liquidity Health
+    if 'avg_liquidity_health_1m' in df.columns:
+        fig_quality.add_trace(
+            go.Scatter(
+                x=df['window_start'],
+                y=df['avg_liquidity_health_1m'],
+                mode='lines+markers',
+                name='Liquidity Health',
+                line=dict(color='teal', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(0, 128, 128, 0.2)'
+            ),
+            row=2, col=1
+        )
+    
+    fig_quality.update_layout(height=600, showlegend=True, hovermode='x unified')
+    fig_quality.update_xaxes(title_text="Time (EST)", row=2, col=1)
+    fig_quality.update_yaxes(title_text="Lambda ($/BTC)", row=1, col=1)
+    fig_quality.update_yaxes(title_text="Health (BTC)", row=2, col=1)
+    
+    st.plotly_chart(fig_quality, width='stretch')
+    
+    # Chart 9: Micro-Price Deviation
+    st.subheader("🎯 Micro-Price Deviation")
+    
+    fig_micro = go.Figure()
+    
+    if 'avg_micro_price_deviation_1m' in df.columns:
+        colors_micro = ['green' if val > 0 else 'red' for val in df['avg_micro_price_deviation_1m']]
+        fig_micro.add_trace(
+            go.Bar(
+                x=df['window_start'],
+                y=df['avg_micro_price_deviation_1m'],
+                name='Micro-Price Deviation',
+                marker_color=colors_micro
+            )
+        )
+        fig_micro.add_hline(y=0, line_dash="dash", line_color="gray")
+    
+    fig_micro.update_layout(
+        xaxis_title="Time (EST)",
+        yaxis_title="Deviation ($)",
+        height=400,
+        hovermode='x unified',
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig_micro, width='stretch')
+    
     # Data Table
     st.subheader("📋 Recent Data")
     
@@ -585,27 +869,136 @@ if df_full is not None and not df_full.empty:
     
     # Statistics section with clear separator
     st.markdown("---")
-    st.subheader("📊 Statistics (Last 24h)")
+    st.subheader("📊 Statistics Summary")
     
-    col1, col2, col3 = st.columns(3)
+    # Create tabs for different statistic categories
+    tab1, tab2, tab3, tab4 = st.tabs(["💰 Price & Volume", "📏 Spreads & Depth", "🌊 Order Flow", "🏥 Market Quality"])
     
-    with col1:
-        st.write("**Price Statistics**")
-        st.write(f"High: ${df['high'].max():,.2f}")
-        st.write(f"Low: ${df['low'].min():,.2f}")
-        st.write(f"Average: ${df['close'].mean():,.2f}")
+    with tab1:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**Price Statistics**")
+            st.write(f"High: ${df['high'].max():,.2f}")
+            st.write(f"Low: ${df['low'].min():,.2f}")
+            st.write(f"Average: ${df['close'].mean():,.2f}")
+            st.write(f"Range: ${df['high'].max() - df['low'].min():,.2f}")
+        
+        with col2:
+            st.write("**Volume Statistics**")
+            st.write(f"Total: {df['total_volume_1m'].sum():,.2f} BTC")
+            st.write(f"Average: {df['total_volume_1m'].mean():,.2f} BTC")
+            st.write(f"Max: {df['total_volume_1m'].max():,.2f} BTC")
+            st.write(f"Min: {df['total_volume_1m'].min():,.2f} BTC")
+        
+        with col3:
+            st.write("**Volatility Statistics**")
+            st.write(f"Average: {df['volatility_1m'].mean():.4f}")
+            st.write(f"Max: {df['volatility_1m'].max():.4f}")
+            st.write(f"Min: {df['volatility_1m'].min():.4f}")
+            st.write(f"Current: {latest['volatility_1m']:.4f}")
     
-    with col2:
-        st.write("**Volume Statistics**")
-        st.write(f"Total: {df['total_volume_1m'].sum():,.2f} BTC")
-        st.write(f"Average: {df['total_volume_1m'].mean():,.2f} BTC")
-        st.write(f"Max: {df['total_volume_1m'].max():,.2f} BTC")
+    with tab2:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**Bid-Ask Spread**")
+            if 'avg_bid_ask_spread_1m' in df.columns:
+                st.write(f"Average: ${df['avg_bid_ask_spread_1m'].mean():.4f}")
+                st.write(f"Min: ${df['avg_bid_ask_spread_1m'].min():.4f}")
+                st.write(f"Max: ${df['avg_bid_ask_spread_1m'].max():.4f}")
+                st.write(f"Current: ${latest.get('avg_bid_ask_spread_1m', 0):.4f}")
+            else:
+                st.write("N/A")
+        
+        with col2:
+            st.write("**Bid Depth (2%)**")
+            if 'avg_bid_depth_2pct_1m' in df.columns:
+                st.write(f"Average: {df['avg_bid_depth_2pct_1m'].mean():.4f} BTC")
+                st.write(f"Min: {df['avg_bid_depth_2pct_1m'].min():.4f} BTC")
+                st.write(f"Max: {df['avg_bid_depth_2pct_1m'].max():.4f} BTC")
+                st.write(f"Current: {latest.get('avg_bid_depth_2pct_1m', 0):.4f} BTC")
+            else:
+                st.write("N/A")
+        
+        with col3:
+            st.write("**Ask Depth (2%)**")
+            if 'avg_ask_depth_2pct_1m' in df.columns:
+                st.write(f"Average: {df['avg_ask_depth_2pct_1m'].mean():.4f} BTC")
+                st.write(f"Min: {df['avg_ask_depth_2pct_1m'].min():.4f} BTC")
+                st.write(f"Max: {df['avg_ask_depth_2pct_1m'].max():.4f} BTC")
+                st.write(f"Current: {latest.get('avg_ask_depth_2pct_1m', 0):.4f} BTC")
+            else:
+                st.write("N/A")
     
-    with col3:
-        st.write("**Volatility Statistics**")
-        st.write(f"Average: {df['volatility_1m'].mean():.4f}")
-        st.write(f"Max: {df['volatility_1m'].max():.4f}")
-        st.write(f"Current: {latest['volatility_1m']:.4f}")
+    with tab3:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**CVD (Cumulative Volume Delta)**")
+            if 'cvd_1m' in df.columns:
+                st.write(f"Average: {df['cvd_1m'].mean():.4f}")
+                st.write(f"Total Range: {df['cvd_1m'].max() - df['cvd_1m'].min():.4f}")
+                st.write(f"Current: {latest.get('cvd_1m', 0):.4f}")
+                cvd_direction = "📈 Buying Pressure" if latest.get('cvd_1m', 0) > 0 else "📉 Selling Pressure"
+                st.write(cvd_direction)
+            else:
+                st.write("N/A")
+        
+        with col2:
+            st.write("**OFI (Order Flow Imbalance)**")
+            if 'total_ofi_1m' in df.columns:
+                st.write(f"Average: {df['total_ofi_1m'].mean():.2f}")
+                st.write(f"Sum: {df['total_ofi_1m'].sum():.2f}")
+                st.write(f"Current: {latest.get('total_ofi_1m', 0):.2f}")
+                ofi_direction = "📈 Bid Pressure" if latest.get('total_ofi_1m', 0) > 0 else "📉 Ask Pressure"
+                st.write(ofi_direction)
+            else:
+                st.write("N/A")
+        
+        with col3:
+            st.write("**Micro-Price Deviation**")
+            if 'avg_micro_price_deviation_1m' in df.columns:
+                st.write(f"Average: ${df['avg_micro_price_deviation_1m'].mean():.4f}")
+                st.write(f"Std Dev: ${df['avg_micro_price_deviation_1m'].std():.4f}")
+                st.write(f"Current: ${latest.get('avg_micro_price_deviation_1m', 0):.4f}")
+            else:
+                st.write("N/A")
+    
+    with tab4:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**Kyle's Lambda (Price Impact)**")
+            if 'avg_kyles_lambda_1m' in df.columns:
+                st.write(f"Average: {df['avg_kyles_lambda_1m'].mean():.2f}")
+                st.write(f"Std Dev: {df['avg_kyles_lambda_1m'].std():.2f}")
+                st.write(f"Current: {latest.get('avg_kyles_lambda_1m', 0):.2f}")
+                impact_level = "Low Impact" if abs(latest.get('avg_kyles_lambda_1m', 0)) < 1000 else "High Impact"
+                st.write(f"Status: {impact_level}")
+            else:
+                st.write("N/A")
+        
+        with col2:
+            st.write("**Liquidity Health**")
+            if 'avg_liquidity_health_1m' in df.columns:
+                st.write(f"Average: {df['avg_liquidity_health_1m'].mean():.2f} BTC")
+                st.write(f"Min: {df['avg_liquidity_health_1m'].min():.2f} BTC")
+                st.write(f"Max: {df['avg_liquidity_health_1m'].max():.2f} BTC")
+                st.write(f"Current: {latest.get('avg_liquidity_health_1m', 0):.2f} BTC")
+            else:
+                st.write("N/A")
+        
+        with col3:
+            st.write("**Volatility Regime**")
+            if 'volatility_regime' in df.columns:
+                regime_counts = df['volatility_regime'].value_counts()
+                for regime, count in regime_counts.items():
+                    pct = (count / len(df)) * 100
+                    st.write(f"{regime.upper()}: {pct:.1f}%")
+                st.write(f"Current: {latest.get('volatility_regime', 'N/A').upper()}")
+            else:
+                st.write("N/A")
     
     # Auto-refresh logic using session state
     st.sidebar.markdown("---")
