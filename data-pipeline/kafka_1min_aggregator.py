@@ -151,7 +151,8 @@ class MinuteAggregator:
         buy_sell_ratios = [d.get('buy_sell_ratio', 0) for d in self.window_data if d.get('buy_sell_ratio', 0) > 0]
         avg_buy_sell_ratio_1m = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0.0
         
-        # Build aggregated message - window_start is EST datetime, convert to milliseconds
+        # Build aggregated message - Convert EST datetime to UTC timestamp
+        # self.window_start is already EST-aware, .timestamp() gives us UTC epoch correctly
         window_start_ms = int(self.window_start.timestamp() * 1000)
         window_end_ms = window_start_ms + 60000  # +60 seconds in ms
         
