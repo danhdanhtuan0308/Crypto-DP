@@ -250,7 +250,7 @@ async def receive_websocket_data(websocket, state):
                         state['order_book']['asks'].sort(key=lambda x: x[0])
                         state['order_book']['asks'] = state['order_book']['asks'][:50]
             
-            # Handle ticker updates (24hr stats)
+            # Handle ticker updates (24hr stats + best bid/ask)
             elif msg_type == 'ticker':
                 latest_price = float(message.get('price', 0))
                 state['latest_ticker'] = {
@@ -263,6 +263,14 @@ async def receive_websocket_data(websocket, state):
                     'timestamp': int(time.time() * 1000)
                 }
                 state['latest_price'] = latest_price
+                
+                # Extract best bid/ask from ticker (for spread calculation)
+                best_bid_str = message.get('best_bid')
+                best_ask_str = message.get('best_ask')
+                if best_bid_str and best_ask_str:
+                    state['best_bid_from_ticker'] = float(best_bid_str)
+                    state['best_ask_from_ticker'] = float(best_ask_str)
+                    state['ticker_spread_available'] = True
                 
                 # Update 24hr stats
                 if state['latest_ticker']['high_24h'] > state['high_24h']:
@@ -345,9 +353,19 @@ async def send_to_kafka_periodically(producer, state):
             # CALCULATE MICROSTRUCTURE METRICS
             # ===============================
             
-            # Get best bid/ask from order book
-            best_bid = state['order_book']['bids'][0][0] if state['order_book']['bids'] else 0
-            best_ask = state['order_book']['asks'][0][0] if state['order_book']['asks'] else 0
+            # Get best bid/ask from order book (Level 2) OR ticker as fallback
+            if state['order_book']['bids'] and state['order_book']['asks']:
+                # Use Level 2 order book if available (more accurate)
+                best_bid = state['order_book']['bids'][0][0]
+                best_ask = state['order_book']['asks'][0][0]
+            elif state.get('ticker_spread_available', False):
+                # Fallback to ticker best bid/ask (updated every ~1 second)
+                best_bid = state.get('best_bid_from_ticker', 0)
+                best_ask = state.get('best_ask_from_ticker', 0)
+            else:
+                # No bid/ask data available
+                best_bid = 0
+                best_ask = 0
             
             # 1. Bid-Ask Spread
             bid_ask_spread_1s = calculate_bid_ask_spread(best_bid, best_ask)
@@ -479,13 +497,15 @@ async def send_to_kafka_periodically(producer, state):
             state['message_count'] += 1
             
             if state['message_count'] % 10 == 0:
+                # Indicate data source
+                source = "📚 L2" if state['order_book']['bids'] else "📊 Ticker"
                 logger.info(
-                    f"📤 Sent {state['message_count']} | "
+                    f"📤 Sent {state['message_count']} | {source} | "
                     f"Price: ${kafka_message['price']:.2f} | "
                     f"Spread: ${kafka_message['bid_ask_spread_1s']:.2f} | "
                     f"Vol: {kafka_message['volume_1s']:.4f} | "
-                    f"Depth: {kafka_message['depth_2pct_1s']:.2f} BTC | "
-                    f"OFI: {kafka_message['ofi_1s']:.4f}"
+                    f"CVD: {kafka_message['cvd_1s']:.2f} | "
+                    f"VWAP: ${kafka_message['vwap_1s']:.2f}"
                 )
         
         # Sleep to maintain exact 1-second intervals
@@ -554,6 +574,11 @@ async def stream_coinbase_to_kafka():
         # Order book state
         'order_book': {'bids': [], 'asks': []},
         
+        # Best bid/ask from ticker (fallback if Level 2 not available)
+        'best_bid_from_ticker': 0.0,
+        'best_ask_from_ticker': 0.0,
+        'ticker_spread_available': False,
+        
         # Microstructure metrics state
         'trades_1s': [],  # Store trades for VWAP calculation
         'cvd': 0.0,  # Cumulative Volume Delta (persistent across windows)
@@ -564,19 +589,27 @@ async def stream_coinbase_to_kafka():
     }
     
     try:
-        async with websockets.connect(COINBASE_WS_URL) as websocket:
+        # Increase message size limit for Level 2 snapshots (can be ~1MB)
+        async with websockets.connect(
+            COINBASE_WS_URL,
+            max_size=2 * 1024 * 1024,  # 2MB limit (default is 1MB)
+            ping_interval=20,
+            ping_timeout=20
+        ) as websocket:
             # Subscribe to ticker, matches, and Level 2 order book
+            # Use level2_batch for limited depth (top 50 levels)
+            # Ticker includes best_bid/best_ask as fallback
             subscribe_message = {
                 "type": "subscribe",
                 "product_ids": [PRODUCT_ID],
                 "channels": [
-                    "ticker",
-                    "matches",
-                    "level2"  # Add Level 2 order book for microstructure metrics
+                    "ticker",       # Includes best_bid, best_ask (updated ~1/sec)
+                    "matches",      # Real-time trades
+                    "level2_batch"  # Top 50 order book levels, batch updates
                 ]
             }
             await websocket.send(json.dumps(subscribe_message))
-            logger.info(f"Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches, level2")
+            logger.info(f"📡 Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches, level2_batch")
             
             # Run all tasks concurrently (receive, send, health check)
             await asyncio.gather(
