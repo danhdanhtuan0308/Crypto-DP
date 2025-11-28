@@ -62,12 +62,14 @@ timeline_option = st.sidebar.radio(
 st.session_state.selected_timeline = timeline_option
 
 # Map timeline to max files to load
+# We need to load MORE files than the timeline to ensure we have recent data
+# Each file contains 1 minute of data, so we load extra to account for gaps
 timeline_map = {
-    "5 Minutes": 5,       # 5 minutes
-    "15 Minutes": 15,     # 15 minutes
-    "30 Minutes": 30,     # 30 minutes
-    "1 Hour": 60,         # 60 minutes
-    "1 Day": 1440         # 24 * 60 minutes
+    "5 Minutes": 60,       # Load 60 files, filter to 5 minutes
+    "15 Minutes": 60,      # Load 60 files, filter to 15 minutes
+    "30 Minutes": 60,      # Load 60 files, filter to 30 minutes
+    "1 Hour": 120,         # Load 120 files, filter to 60 minutes
+    "1 Day": 1500          # 24 * 60 + buffer
 }
 MAX_FILES = timeline_map[timeline_option]
 
@@ -129,11 +131,20 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         blobs = []
         
         if timeline in ["1 Hour", "30 Minutes", "15 Minutes", "5 Minutes"]:
-            # Only need today's data (EST)
+            # For shorter timeframes, load today's data
+            # Also load from previous hour's folder in case we're near hour boundary
             today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
             st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
             st.sidebar.warning(f"🔍 Searching: {today_prefix}...")
-            blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=200))
+            blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=500))
+            
+            # If near midnight, also check yesterday
+            if now_est.hour < 2:
+                yesterday_est = now_est - timedelta(days=1)
+                yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
+                yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=200))
+                blobs = blobs + yesterday_blobs
+                st.sidebar.info(f"📅 Also loaded {len(yesterday_blobs)} files from yesterday (near midnight)")
         else:
             # 1 Day - need today AND yesterday (EST)
             today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
@@ -257,8 +268,19 @@ if df_full is not None and not df_full.empty:
     # Filter data - window_start is already EST timezone-aware
     df = df_full[df_full['window_start'] >= cutoff_time].copy()
     
+    # Debug: Show data range vs cutoff
+    if not df_full.empty:
+        data_min = df_full['window_start'].min()
+        data_max = df_full['window_start'].max()
+        st.sidebar.text(f"📊 Data range: {data_min.strftime('%H:%M:%S')} - {data_max.strftime('%H:%M:%S')}")
+        st.sidebar.text(f"⏰ Cutoff: {cutoff_time.strftime('%H:%M:%S')}")
+    
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
+        # Show more debug info
+        if not df_full.empty:
+            st.info(f"Data timestamps range: {data_min.strftime('%Y-%m-%d %H:%M:%S')} to {data_max.strftime('%Y-%m-%d %H:%M:%S')} EST")
+            st.info(f"Looking for data after: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')} EST")
         df = df_full.copy()
     
     st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
