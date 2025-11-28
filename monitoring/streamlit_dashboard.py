@@ -145,19 +145,25 @@ def load_new_data_from_gcs(since_time=None):
         
         # If incremental load (since_time provided), filter to only new files
         if since_time is not None:
-            blobs = [b for b in blobs if b.time_created > since_time]
-            st.sidebar.success(f"🔄 Incremental: Found {len(blobs)} new files since last load")
-        
-        if not blobs:
-            # Fallback: try loading from entire today if no data in last 3 hours
-            today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
-            st.warning(f"⚠️ No data in last 3 hours, loading full day: {today_prefix}")
-            blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
+            # Convert since_time to timezone-aware if needed
+            if since_time.tzinfo is None:
+                since_time = pytz.UTC.localize(since_time)
             
+            initial_count = len(blobs)
+            blobs = [b for b in blobs if b.time_created.replace(tzinfo=pytz.UTC) > since_time]
+            st.sidebar.success(f"🔄 Incremental: {len(blobs)} new files (from {initial_count} total)")
+        
+        # Handle different cases
         if not blobs:
-            st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
-            st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/day=27/...")
-            return None
+            if since_time is not None:
+                # Incremental load found no new files - return empty DataFrame
+                st.sidebar.info("ℹ️ No new files to load")
+                return pd.DataFrame()
+            else:
+                # First load found no files - error
+                st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
+                st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/day=27/...")
+                return None
         
         # Sort by creation time - take most recent up to 1500 (covers 24+ hours)
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
