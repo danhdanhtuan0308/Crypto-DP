@@ -37,6 +37,10 @@ if 'selected_timeline' not in st.session_state:
     st.session_state.selected_timeline = "1 Day"
 if 'last_refresh_time' not in st.session_state:
     st.session_state.last_refresh_time = time.time()
+if 'cached_dataframe' not in st.session_state:
+    st.session_state.cached_dataframe = None
+if 'last_loaded_time' not in st.session_state:
+    st.session_state.last_loaded_time = None
 
 # Sidebar configuration
 st.sidebar.header("Settings")
@@ -46,6 +50,8 @@ st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
 # Clear cache button
 if st.sidebar.button("🗑️ Clear Cache"):
     st.cache_data.clear()
+    st.session_state.cached_dataframe = None
+    st.session_state.last_loaded_time = None
     st.rerun()
 
 # Timeline selector (like TradingView)
@@ -68,16 +74,17 @@ BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-@st.cache_data(ttl=None)  # No automatic TTL - we control refresh manually via session state
-def load_data_from_gcs():
-    """Load latest parquet files from GCS
+def load_new_data_from_gcs(since_time=None):
+    """Load new parquet files from GCS (incremental loading)
+    
+    Args:
+        since_time: datetime - only load files created after this time (for incremental updates)
     
     Returns:
-        DataFrame with all loaded data (will be filtered by caller based on timeline)
+        DataFrame with newly loaded data
     
-    Note: Loads all data from today+yesterday (~1400 files, 24 hours).
-    Cache controlled manually via session state to avoid unwanted refreshes.
-    Only refreshes when user triggers or 60-second countdown completes.
+    Note: If since_time is None, loads full 24 hours. Otherwise, only loads files
+    created after since_time (incremental - typically just 1-2 new files per minute).
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -135,6 +142,11 @@ def load_data_from_gcs():
         blobs = today_blobs + yesterday_blobs
         
         st.sidebar.info(f"📅 Today: {len(today_blobs)}, Yesterday: {len(yesterday_blobs)} files")
+        
+        # If incremental load (since_time provided), filter to only new files
+        if since_time is not None:
+            blobs = [b for b in blobs if b.time_created > since_time]
+            st.sidebar.success(f"🔄 Incremental: Found {len(blobs)} new files since last load")
         
         if not blobs:
             # Fallback: try loading from entire today if no data in last 3 hours
@@ -222,19 +234,55 @@ def load_data_from_gcs():
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - cached with TTL, not dependent on any parameter
-# This means switching timelines uses cached data, only reloads when TTL expires
+# Smart incremental loading logic
 load_start = time.time()
-with st.spinner("Loading latest data from GCS..."):
-    df_full = load_data_from_gcs()
-load_time = time.time() - load_start
+
+# Check if we have cached data
+if st.session_state.cached_dataframe is not None:
+    # We have cached data - just load NEW files since last load
+    st.sidebar.info("⚡ Using cached data + loading new files...")
+    with st.spinner("Loading new data..."):
+        new_df = load_new_data_from_gcs(since_time=st.session_state.last_loaded_time)
+    
+    if new_df is not None and not new_df.empty:
+        # Merge new data with cached data
+        df_full = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
+        
+        # Remove duplicates and sort
+        df_full = df_full.sort_values('window_start', ascending=True)
+        df_full = df_full.drop_duplicates(subset=['window_start'], keep='last')
+        
+        # Keep only last 24 hours (sliding window)
+        cutoff_24h = datetime.now(EASTERN) - timedelta(hours=25)  # 25 to have buffer
+        df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
+        
+        # Update cache
+        st.session_state.cached_dataframe = df_full
+        st.session_state.last_loaded_time = datetime.now(pytz.UTC)
+        
+        load_time = time.time() - load_start
+        st.sidebar.success(f"✅ Added {len(new_df)} new records ({load_time:.1f}s)")
+    else:
+        # No new data, use existing cache
+        df_full = st.session_state.cached_dataframe
+        load_time = time.time() - load_start
+        st.sidebar.info(f"⚡ No new data, using cache ({load_time*1000:.0f}ms)")
+else:
+    # First load - get all data
+    st.sidebar.warning("📥 First load: Loading full 24 hours...")
+    with st.spinner("Loading data from GCS..."):
+        df_full = load_new_data_from_gcs(since_time=None)
+    
+    if df_full is not None and not df_full.empty:
+        # Cache the data
+        st.session_state.cached_dataframe = df_full
+        st.session_state.last_loaded_time = datetime.now(pytz.UTC)
+        load_time = time.time() - load_start
+        st.sidebar.success(f"📥 Loaded {len(df_full)} records ({load_time:.1f}s)")
+    else:
+        load_time = time.time() - load_start
 
 if df_full is not None and not df_full.empty:
-    # Show if data was cached (fast) or freshly loaded (slow)
-    if load_time < 0.1:
-        st.sidebar.success(f"⚡ Using cached data ({load_time*1000:.0f}ms)")
-    else:
-        st.sidebar.info(f"📥 Loaded fresh data ({load_time:.1f}s)")
     # Filter data by selected timeframe - ALL IN EASTERN TIME
     now_est = datetime.now(EASTERN)  # Keep timezone aware
     
@@ -504,10 +552,9 @@ if df_full is not None and not df_full.empty:
     time_since_refresh = current_time - st.session_state.last_refresh_time
     
     if time_since_refresh >= refresh_interval:
-        # Time to refresh - clear cache and reload
+        # Time to refresh - DON'T clear cache, just reload page to fetch new data
         st.session_state.last_refresh_time = current_time
-        st.sidebar.info("🔄 Refreshing data now...")
-        st.cache_data.clear()  # Clear cache to force reload
+        st.sidebar.info("🔄 Fetching new data...")
         time.sleep(0.1)
         st.rerun()
     else:
