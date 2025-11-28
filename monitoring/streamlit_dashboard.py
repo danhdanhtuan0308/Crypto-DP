@@ -68,16 +68,16 @@ BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-@st.cache_data(ttl=60)  # Cache for 60 seconds (1 minute) - auto refreshes
+@st.cache_data(ttl=None)  # No automatic TTL - we control refresh manually via session state
 def load_data_from_gcs():
     """Load latest parquet files from GCS
     
     Returns:
         DataFrame with all loaded data (will be filtered by caller based on timeline)
     
-    Note: On first load, gets all data from today+yesterday (~1400 files).
-    On refresh, only loads files from last 2 hours (incremental) to be fast.
-    Cache auto-refreshes every 60 seconds via TTL to get new data.
+    Note: Loads all data from today+yesterday (~1400 files, 24 hours).
+    Cache controlled manually via session state to avoid unwanted refreshes.
+    Only refreshes when user triggers or 60-second countdown completes.
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -119,21 +119,22 @@ def load_data_from_gcs():
         # For longer timeframes, we need to load from previous day(s) too
         blobs = []
         
-        # Smart loading: Load only last 2 hours for faster refresh
-        # This gives us enough data for all timeframes while being fast
+        # Load last 24 hours of data for "1 Day" timeline support
         st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Load current hour and previous 2 hours
-        blobs = []
-        for hours_back in range(3):  # 0, 1, 2 hours back
-            hour_time = now_est - timedelta(hours=hours_back)
-            hour_prefix = f"year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
-            hour_blobs = list(bucket.list_blobs(prefix=hour_prefix, max_results=100))
-            blobs.extend(hour_blobs)
-            if hours_back == 0:
-                st.sidebar.text(f"📁 Current hour: {len(hour_blobs)} files")
+        # Load from today and yesterday
+        today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
+        yesterday_est = now_est - timedelta(days=1)
+        yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
         
-        st.sidebar.info(f"✅ Total files found: {len(blobs)} (last 3 hours)")
+        st.sidebar.warning(f"🔍 Loading: {today_prefix} + yesterday...")
+        
+        # Load both days
+        today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
+        yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
+        blobs = today_blobs + yesterday_blobs
+        
+        st.sidebar.info(f"📅 Today: {len(today_blobs)}, Yesterday: {len(yesterday_blobs)} files")
         
         if not blobs:
             # Fallback: try loading from entire today if no data in last 3 hours
@@ -294,55 +295,62 @@ if df_full is not None and not df_full.empty:
     # Latest metrics
     latest = df.iloc[-1]
     
-    # Key Metrics Row (6 columns)
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # Divider before metrics
+    st.markdown("---")
     
-    with col1:
-        st.metric(
-            label="Current Price",
-            value=f"${latest['close']:,.2f}",
-            delta=f"{latest['price_change_percent_1m']:.2f}%"
-        )
+    # Metrics in a container to prevent duplicates
+    metrics_container = st.container()
     
-    with col2:
-        st.metric(
-            label="Volatility (1m)",
-            value=f"{latest['volatility_1m']:.4f}",
-        )
-    
-    with col3:
-        st.metric(
-            label="Buy Volume (1m)",
-            value=f"{latest['total_buy_volume_1m']:.4f} BTC",
-        )
-    
-    with col4:
-        st.metric(
-            label="Sell Volume (1m)",
-            value=f"{latest['total_sell_volume_1m']:.4f} BTC",
-        )
-    
-    with col5:
-        st.metric(
-            label="Total Volume (1m)",
-            value=f"{latest['total_volume_1m']:.4f} BTC",
-        )
-    
-    with col6:
-        st.metric(
-            label="Trade Count (1m)",
-            value=f"{latest.get('trade_count_1m', 0):.0f}",
-        )
-    
-    # Second row of metrics
-    col7, col8, col9 = st.columns(3)
-    
-    with col7:
-        st.metric(
-            label="Order Imbalance",
-            value=f"{latest['order_imbalance_ratio_1m']:.4f}",
-            delta="Buy 📈" if latest['order_imbalance_ratio_1m'] > 0 else "Sell 📉"
-        )
+    with metrics_container:
+        # Key Metrics Row (6 columns)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        with col1:
+            st.metric(
+                label="Current Price",
+                value=f"${latest['close']:,.2f}",
+                delta=f"{latest['price_change_percent_1m']:.2f}%"
+            )
+        
+        with col2:
+            st.metric(
+                label="Volatility (1m)",
+                value=f"{latest['volatility_1m']:.4f}",
+            )
+        
+        with col3:
+            st.metric(
+                label="Buy Volume (1m)",
+                value=f"{latest['total_buy_volume_1m']:.4f} BTC",
+            )
+        
+        with col4:
+            st.metric(
+                label="Sell Volume (1m)",
+                value=f"{latest['total_sell_volume_1m']:.4f} BTC",
+            )
+        
+        with col5:
+            st.metric(
+                label="Total Volume (1m)",
+                value=f"{latest['total_volume_1m']:.4f} BTC",
+            )
+        
+        with col6:
+            st.metric(
+                label="Trade Count (1m)",
+                value=f"{latest.get('trade_count_1m', 0):.0f}",
+            )
+        
+        # Second row of metrics
+        col7, col8, col9 = st.columns(3)
+        
+        with col7:
+            st.metric(
+                label="Order Imbalance",
+                value=f"{latest['order_imbalance_ratio_1m']:.4f}",
+                delta="Buy 📈" if latest['order_imbalance_ratio_1m'] > 0 else "Sell 📉"
+            )
     
     # Chart 1: Price Chart (OHLC Candlestick)
     st.subheader("📈 BTC Price Movement (OHLC)")
@@ -496,9 +504,10 @@ if df_full is not None and not df_full.empty:
     time_since_refresh = current_time - st.session_state.last_refresh_time
     
     if time_since_refresh >= refresh_interval:
-        # Time to refresh
+        # Time to refresh - clear cache and reload
         st.session_state.last_refresh_time = current_time
-        st.sidebar.info("🔄 Refreshing now...")
+        st.sidebar.info("🔄 Refreshing data now...")
+        st.cache_data.clear()  # Clear cache to force reload
         time.sleep(0.1)
         st.rerun()
     else:
