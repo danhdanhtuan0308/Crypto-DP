@@ -61,18 +61,6 @@ timeline_option = st.sidebar.radio(
 # Save selection to session state
 st.session_state.selected_timeline = timeline_option
 
-# Map timeline to max files to load
-# Load reasonable amounts - the sorting by time_created helps get recent files
-# Each file contains 1 minute of data
-timeline_map = {
-    "5 Minutes": 10,       # Load 10 files, filter to 5 minutes
-    "15 Minutes": 20,      # Load 20 files, filter to 15 minutes
-    "30 Minutes": 40,      # Load 40 files, filter to 30 minutes
-    "1 Hour": 80,          # Load 80 files, filter to 60 minutes
-    "1 Day": 1500          # 24 * 60 + buffer
-}
-MAX_FILES = timeline_map[timeline_option]
-
 # Force cache invalidation by including current time bucket (changes every 10 seconds)
 current_time_bucket = datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-1]  # Changes every 10 seconds
 
@@ -82,13 +70,17 @@ PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 @st.cache_data(ttl=10)  # Cache for 10 seconds for more frequent updates
-def load_data_from_gcs(time_bucket, max_files, timeline):
+def load_data_from_gcs(time_bucket):
     """Load latest parquet files from GCS
     
     Args:
         time_bucket: Current time bucket to force cache refresh every 10 seconds
-        max_files: Number of files to load (changes cache when timeline changes)
-        timeline: Timeline option (changes cache when timeframe changes)
+    
+    Returns:
+        DataFrame with all loaded data (will be filtered by caller based on timeline)
+    
+    Note: Loads ~24 hours of data and caches it. Switching timelines just filters
+    this cached data in memory, avoiding expensive re-downloads.
     """
     try:
         # Initialize client with credentials from environment or Streamlit secrets
@@ -130,35 +122,20 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         # For longer timeframes, we need to load from previous day(s) too
         blobs = []
         
-        if timeline in ["1 Hour", "30 Minutes", "15 Minutes", "5 Minutes"]:
-            # For shorter timeframes, load from current hour AND previous hour
-            current_hour_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
-            st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
-            st.sidebar.warning(f"🔍 Searching: {current_hour_prefix}...")
-            blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=200))
-            
-            # Also load previous hour in case we're near hour boundary
-            prev_hour = now_est - timedelta(hours=1)
-            prev_hour_prefix = f"year={prev_hour.year}/month={prev_hour.month:02d}/day={prev_hour.day:02d}/hour={prev_hour.hour:02d}/"
-            prev_blobs = list(bucket.list_blobs(prefix=prev_hour_prefix, max_results=200))
-            blobs = blobs + prev_blobs
-            st.sidebar.info(f"📁 Current hour: {len(blobs) - len(prev_blobs)} files, Prev hour: {len(prev_blobs)} files")
-            
-
-        else:
-            # 1 Day - need today AND yesterday (EST)
-            today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
-            yesterday_est = now_est - timedelta(days=1)
-            yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
-            
-            st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
-            st.sidebar.warning(f"🔍 Searching: {today_prefix} + {yesterday_prefix}...")
-            
-            # Load from both days
-            today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
-            yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
-            blobs = today_blobs + yesterday_blobs
-            st.sidebar.info(f"📅 Today: {len(today_blobs)} files, Yesterday: {len(yesterday_blobs)} files")
+        # ALWAYS load from today + yesterday to support all timeframes
+        # This way we load once and filter in memory, avoiding re-downloads on timeline switch
+        today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
+        yesterday_est = now_est - timedelta(days=1)
+        yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
+        
+        st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
+        st.sidebar.warning(f"🔍 Loading: {today_prefix} + yesterday...")
+        
+        # Load from both days - this gets cached
+        today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
+        yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
+        blobs = today_blobs + yesterday_blobs
+        st.sidebar.info(f"📅 Today: {len(today_blobs)} files, Yesterday: {len(yesterday_blobs)} files")
         
         if not blobs:
             st.error(f"❌ No data found for today: gs://{BUCKET_NAME}/{today_prefix}")
@@ -171,9 +148,11 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
             st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/day=27/...")
             return None
         
-        # Sort by creation time and take only most recent
+        # Sort by creation time - take most recent up to 1500 (covers 24+ hours)
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        latest_blobs = blobs_sorted[:max_files]  # Use parameter instead of global
+        # Limit to reasonable max to avoid loading too much
+        max_load = min(len(blobs_sorted), 1500)
+        latest_blobs = blobs_sorted[:max_load]
         
         st.sidebar.success(f"✅ Found {len(blobs)} files, loading {len(latest_blobs)}...")
         
@@ -244,11 +223,19 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# Load data - pass time_bucket, MAX_FILES and timeline_option to force refresh
+# Load data - cached by time_bucket only, not by timeline
+# This means switching timelines won't reload data, just filter differently
+load_start = time.time()
 with st.spinner("Loading latest data from GCS..."):
-    df_full = load_data_from_gcs(current_time_bucket, MAX_FILES, timeline_option)
+    df_full = load_data_from_gcs(current_time_bucket)
+load_time = time.time() - load_start
 
 if df_full is not None and not df_full.empty:
+    # Show if data was cached (fast) or freshly loaded (slow)
+    if load_time < 0.1:
+        st.sidebar.success(f"⚡ Using cached data ({load_time*1000:.0f}ms)")
+    else:
+        st.sidebar.info(f"📥 Loaded fresh data ({load_time:.1f}s)")
     # Filter data by selected timeframe - ALL IN EASTERN TIME
     now_est = datetime.now(EASTERN)  # Keep timezone aware
     
