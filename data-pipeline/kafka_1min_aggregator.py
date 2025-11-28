@@ -15,6 +15,7 @@ import os
 from dotenv import load_dotenv
 import logging
 import pytz
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,6 +152,64 @@ class MinuteAggregator:
         buy_sell_ratios = [d.get('buy_sell_ratio', 0) for d in self.window_data if d.get('buy_sell_ratio', 0) > 0]
         avg_buy_sell_ratio_1m = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0.0
         
+        # ===============================
+        # AGGREGATE MICROSTRUCTURE METRICS
+        # ===============================
+        
+        # 1. Bid-Ask Spread (average over 1 minute)
+        spreads = [d.get('bid_ask_spread_1s', 0) for d in self.window_data if d.get('bid_ask_spread_1s', 0) > 0]
+        avg_bid_ask_spread_1m = np.mean(spreads) if spreads else 0
+        
+        # 2. Order Book Depth 2% (average over 1 minute)
+        depths = [d.get('depth_2pct_1s', 0) for d in self.window_data if d.get('depth_2pct_1s', 0) > 0]
+        avg_depth_2pct_1m = np.mean(depths) if depths else 0
+        
+        bid_depths = [d.get('bid_depth_2pct_1s', 0) for d in self.window_data if d.get('bid_depth_2pct_1s', 0) > 0]
+        avg_bid_depth_2pct_1m = np.mean(bid_depths) if bid_depths else 0
+        
+        ask_depths = [d.get('ask_depth_2pct_1s', 0) for d in self.window_data if d.get('ask_depth_2pct_1s', 0) > 0]
+        avg_ask_depth_2pct_1m = np.mean(ask_depths) if ask_depths else 0
+        
+        # 3. VWAP (average over 1 minute)
+        vwaps = [d.get('vwap_1s', 0) for d in self.window_data if d.get('vwap_1s', 0) > 0]
+        avg_vwap_1m = np.mean(vwaps) if vwaps else 0
+        
+        # 4. Micro-Price Deviation (average over 1 minute)
+        micro_deviations = [d.get('micro_price_deviation_1s', 0) for d in self.window_data]
+        avg_micro_price_deviation_1m = np.mean(micro_deviations) if micro_deviations else 0
+        
+        # 5. CVD (Cumulative Volume Delta) - use latest value as it's cumulative
+        cvd_1m = latest_data.get('cvd_1s', 0)
+        
+        # 6. Order Flow Imbalance (sum over 1 minute)
+        ofi_values = [d.get('ofi_1s', 0) for d in self.window_data]
+        total_ofi_1m = sum(ofi_values)
+        avg_ofi_1m = np.mean(ofi_values) if ofi_values else 0
+        
+        # 7. Kyle's Lambda (average over 1 minute)
+        lambdas = [d.get('kyles_lambda_1s', 0) for d in self.window_data if d.get('kyles_lambda_1s', 0) != 0]
+        avg_kyles_lambda_1m = np.mean(lambdas) if lambdas else 0
+        
+        # 8. Liquidity Health (average over 1 minute)
+        health_values = [d.get('liquidity_health_1s', 0) for d in self.window_data if d.get('liquidity_health_1s', 0) > 0]
+        avg_liquidity_health_1m = np.mean(health_values) if health_values else 0
+        
+        # 9. Mid-Price (average over 1 minute)
+        mid_prices = [d.get('mid_price_1s', 0) for d in self.window_data if d.get('mid_price_1s', 0) > 0]
+        avg_mid_price_1m = np.mean(mid_prices) if mid_prices else 0
+        
+        # 10. Best Bid/Ask (latest values)
+        latest_best_bid = latest_data.get('best_bid_1s', 0)
+        latest_best_ask = latest_data.get('best_ask_1s', 0)
+        
+        # 11. Volatility Regime Classification
+        if volatility_1m < 0.1:
+            volatility_regime = 'low'
+        elif volatility_1m < 0.5:
+            volatility_regime = 'medium'
+        else:
+            volatility_regime = 'high'
+        
         # Build aggregated message - Convert EST datetime to UTC timestamp
         # self.window_start is already EST-aware, .timestamp() gives us UTC epoch correctly
         window_start_ms = int(self.window_start.timestamp() * 1000)
@@ -178,7 +237,7 @@ class MinuteAggregator:
             'high_24h': high_24h,
             'low_24h': low_24h,
             
-            # NEW FEATURES
+            # EXISTING FEATURES
             'volatility_1m': volatility_1m,
             'order_imbalance_ratio_1m': order_imbalance_ratio_1m,
             
@@ -188,7 +247,26 @@ class MinuteAggregator:
             'price_change_1m': price_change_1m,
             'price_change_percent_1m': price_change_percent_1m,
             'num_ticks': len(self.window_data),
-            'last_ingestion_time': latest_data.get('ingestion_time', datetime.now(EASTERN).isoformat())
+            'last_ingestion_time': latest_data.get('ingestion_time', datetime.now(EASTERN).isoformat()),
+            
+            # ===============================
+            # NEW MICROSTRUCTURE METRICS (1m aggregated)
+            # ===============================
+            'avg_bid_ask_spread_1m': avg_bid_ask_spread_1m,
+            'avg_depth_2pct_1m': avg_depth_2pct_1m,
+            'avg_bid_depth_2pct_1m': avg_bid_depth_2pct_1m,
+            'avg_ask_depth_2pct_1m': avg_ask_depth_2pct_1m,
+            'avg_vwap_1m': avg_vwap_1m,
+            'avg_micro_price_deviation_1m': avg_micro_price_deviation_1m,
+            'cvd_1m': cvd_1m,  # Cumulative (latest value)
+            'total_ofi_1m': total_ofi_1m,  # Sum of OFI over 1 minute
+            'avg_ofi_1m': avg_ofi_1m,  # Average OFI
+            'avg_kyles_lambda_1m': avg_kyles_lambda_1m,
+            'avg_liquidity_health_1m': avg_liquidity_health_1m,
+            'avg_mid_price_1m': avg_mid_price_1m,
+            'latest_best_bid_1m': latest_best_bid,
+            'latest_best_ask_1m': latest_best_ask,
+            'volatility_regime': volatility_regime,
         }
         
         # Reset for next window
@@ -229,13 +307,13 @@ def main():
                         )
                         producer.poll(0)
                         logger.info(
-                            f"Aggregated minute {aggregator.message_count} | "
+                            f"⏰ Agg #{aggregator.message_count} (timeout) | "
                             f"EST: {agg_msg['window_start_est']} | "
                             f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                             f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "
                             f"Vol: {agg_msg['total_volume_1m']:.4f} | "
-                            f"Volatility: {agg_msg['volatility_1m']:.4f} | "
-                            f"OIR: {agg_msg['order_imbalance_ratio_1m']:.4f}"
+                            f"Spread: ${agg_msg['avg_bid_ask_spread_1m']:.2f} | "
+                            f"Depth: {agg_msg['avg_depth_2pct_1m']:.2f}"
                         )
                 continue
             
@@ -260,13 +338,15 @@ def main():
                     )
                     producer.poll(0)
                     logger.info(
-                        f"Aggregated minute {aggregator.message_count} | "
+                        f"✅ Agg #{aggregator.message_count} | "
                         f"EST: {agg_msg['window_start_est']} | "
                         f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                         f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "
                         f"Vol: {agg_msg['total_volume_1m']:.4f} | "
-                        f"Volatility: {agg_msg['volatility_1m']:.4f} | "
-                        f"OIR: {agg_msg['order_imbalance_ratio_1m']:.4f}"
+                        f"Spread: ${agg_msg['avg_bid_ask_spread_1m']:.2f} | "
+                        f"Depth: {agg_msg['avg_depth_2pct_1m']:.2f} | "
+                        f"Vol: {agg_msg['volatility_1m']:.4f}% | "
+                        f"λ: {agg_msg['avg_kyles_lambda_1m']:.6f}"
                     )
                 
             except json.JSONDecodeError as e:

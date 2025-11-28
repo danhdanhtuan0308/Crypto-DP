@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
 import pytz
+import numpy as np
+import websockets.exceptions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +48,105 @@ HEALTH_CHECK_INTERVAL = 10  # check every 10 seconds
 def delivery_callback(err, msg):
     if err:
         logger.error(f'Delivery failed: {err}')
+
+
+# Microstructure Metrics Calculations
+def calculate_bid_ask_spread(best_bid, best_ask):
+    """Calculate Bid-Ask Spread"""
+    if best_bid > 0 and best_ask > 0:
+        return best_ask - best_bid
+    return 0
+
+
+def calculate_mid_price(best_bid, best_ask):
+    """Calculate Mid-Price"""
+    if best_bid > 0 and best_ask > 0:
+        return (best_bid + best_ask) / 2
+    return 0
+
+
+def calculate_order_book_depth_2pct(order_book, mid_price):
+    """
+    Calculate Order Book Depth within 2% of mid-price
+    Returns total volume of bids and asks within 2% range
+    """
+    if mid_price <= 0:
+        return 0, 0, 0
+    
+    bid_depth = 0
+    ask_depth = 0
+    
+    # 2% range
+    bid_threshold = mid_price * 0.98  # mid-price - 2%
+    ask_threshold = mid_price * 1.02  # mid-price + 2%
+    
+    # Sum bid volumes within range
+    for price, volume in order_book.get('bids', []):
+        if price >= bid_threshold:
+            bid_depth += volume
+    
+    # Sum ask volumes within range
+    for price, volume in order_book.get('asks', []):
+        if price <= ask_threshold:
+            ask_depth += volume
+    
+    total_depth = bid_depth + ask_depth
+    return total_depth, bid_depth, ask_depth
+
+
+def calculate_vwap(trades):
+    """
+    Calculate Volume Weighted Average Price (VWAP)
+    trades: list of {'price': float, 'volume': float}
+    """
+    if not trades:
+        return 0
+    
+    total_pv = sum(t['price'] * t['volume'] for t in trades if t.get('volume', 0) > 0)
+    total_volume = sum(t['volume'] for t in trades if t.get('volume', 0) > 0)
+    
+    if total_volume > 0:
+        return total_pv / total_volume
+    return 0
+
+
+def calculate_micro_price_deviation(trade_price, mid_price):
+    """
+    Calculate Micro-Price Deviation
+    Deviation = Trade Price - Mid-Price
+    """
+    if mid_price > 0:
+        return trade_price - mid_price
+    return 0
+
+
+def calculate_order_flow_imbalance(delta_bid_volume, delta_ask_volume):
+    """
+    Calculate Order Flow Imbalance (OFI)
+    OFI ≈ ΔBid Volume - ΔAsk Volume
+    """
+    return delta_bid_volume - delta_ask_volume
+
+
+def calculate_kyles_lambda(price_change, signed_order_volume):
+    """
+    Calculate Kyle's Lambda (market impact coefficient)
+    λ = ΔPrice / Signed Order Volume
+    """
+    if signed_order_volume != 0:
+        return price_change / signed_order_volume
+    return 0
+
+
+def calculate_liquidity_health(order_book_depth, bid_ask_spread, volatility):
+    """
+    Calculate Liquidity Health
+    Health ∝ Depth / (Spread × Volatility)
+    """
+    denominator = bid_ask_spread * volatility if volatility > 0 else 1
+    if denominator > 0 and bid_ask_spread > 0:
+        return order_book_depth / denominator
+    return 0
 
 
 # Calculate rolling metrics over different time windows
@@ -103,8 +204,54 @@ async def receive_websocket_data(websocket, state):
                 logger.info(f"Subscription confirmed: {message.get('channels', [])}")
                 continue
             
+            # Handle Level 2 snapshot (initial order book state)
+            elif msg_type == 'snapshot':
+                state['order_book'] = {
+                    'bids': [(float(p), float(v)) for p, v in message.get('bids', [])[:50]],  # Top 50
+                    'asks': [(float(p), float(v)) for p, v in message.get('asks', [])[:50]]
+                }
+                logger.info(f"📚 Order book snapshot received: {len(state['order_book']['bids'])} bids, {len(state['order_book']['asks'])} asks")
+            
+            # Handle Level 2 updates (incremental order book changes)
+            elif msg_type == 'l2update':
+                changes = message.get('changes', [])
+                for change in changes:
+                    side, price_str, size_str = change
+                    price = float(price_str)
+                    size = float(size_str)
+                    
+                    book_side = 'bids' if side == 'buy' else 'asks'
+                    
+                    # Track volume deltas for OFI calculation
+                    if side == 'buy':
+                        state['delta_bid_volume_1s'] += size
+                    else:
+                        state['delta_ask_volume_1s'] += size
+                    
+                    # Update order book (remove if size = 0, else update)
+                    if size == 0:
+                        state['order_book'][book_side] = [(p, v) for p, v in state['order_book'][book_side] if p != price]
+                    else:
+                        # Update existing or add new
+                        found = False
+                        for i, (p, v) in enumerate(state['order_book'][book_side]):
+                            if p == price:
+                                state['order_book'][book_side][i] = (price, size)
+                                found = True
+                                break
+                        if not found:
+                            state['order_book'][book_side].append((price, size))
+                    
+                    # Keep order book sorted and limited
+                    if side == 'buy':
+                        state['order_book']['bids'].sort(reverse=True, key=lambda x: x[0])
+                        state['order_book']['bids'] = state['order_book']['bids'][:50]
+                    else:
+                        state['order_book']['asks'].sort(key=lambda x: x[0])
+                        state['order_book']['asks'] = state['order_book']['asks'][:50]
+            
             # Handle ticker updates (24hr stats)
-            if msg_type == 'ticker':
+            elif msg_type == 'ticker':
                 latest_price = float(message.get('price', 0))
                 state['latest_ticker'] = {
                     'symbol': message.get('product_id', PRODUCT_ID),
@@ -131,6 +278,24 @@ async def receive_websocket_data(websocket, state):
                 
                 state['latest_price'] = trade_price
                 state['last_trade_time'] = time.time()  # Update last trade time
+                
+                # Store trade for VWAP calculation
+                state['trades_1s'].append({
+                    'price': trade_price,
+                    'volume': trade_size,
+                    'side': 'buy' if is_buy else 'sell',
+                    'timestamp': time.time()
+                })
+                
+                # Track previous price for Kyle's Lambda
+                if state['previous_price'] > 0:
+                    price_change = trade_price - state['previous_price']
+                    signed_volume = trade_size if is_buy else -trade_size
+                    state['kyles_lambda_data'].append({
+                        'price_change': price_change,
+                        'signed_volume': signed_volume
+                    })
+                state['previous_price'] = trade_price
                 
                 if is_buy:
                     state['buy_volume_1s'] += trade_size
@@ -176,6 +341,64 @@ async def send_to_kafka_periodically(producer, state):
             price_change_24h = current_price - state['latest_ticker'].get('open_24h', current_price)
             price_change_percent_24h = (price_change_24h / state['latest_ticker'].get('open_24h', 1) * 100) if state['latest_ticker'].get('open_24h', 0) > 0 else 0
             
+            # ===============================
+            # CALCULATE MICROSTRUCTURE METRICS
+            # ===============================
+            
+            # Get best bid/ask from order book
+            best_bid = state['order_book']['bids'][0][0] if state['order_book']['bids'] else 0
+            best_ask = state['order_book']['asks'][0][0] if state['order_book']['asks'] else 0
+            
+            # 1. Bid-Ask Spread
+            bid_ask_spread_1s = calculate_bid_ask_spread(best_bid, best_ask)
+            
+            # 2. Mid-Price
+            mid_price_1s = calculate_mid_price(best_bid, best_ask)
+            
+            # 3. Order Book Depth (2%)
+            depth_2pct_1s, bid_depth_2pct_1s, ask_depth_2pct_1s = calculate_order_book_depth_2pct(
+                state['order_book'], mid_price_1s
+            )
+            
+            # 4. VWAP (Volume Weighted Average Price)
+            vwap_1s = calculate_vwap(state['trades_1s'])
+            
+            # 5. Micro-Price Deviation (average deviation of trades from mid-price)
+            micro_price_deviations = [
+                calculate_micro_price_deviation(t['price'], mid_price_1s)
+                for t in state['trades_1s']
+            ]
+            avg_micro_price_deviation_1s = np.mean(micro_price_deviations) if micro_price_deviations else 0
+            
+            # 6. Cumulative Volume Delta (CVD)
+            delta_volume_1s = state['buy_volume_1s'] - state['sell_volume_1s']
+            state['cvd'] += delta_volume_1s
+            cvd_1s = state['cvd']
+            
+            # 7. Order Flow Imbalance (OFI)
+            ofi_1s = calculate_order_flow_imbalance(
+                state['delta_bid_volume_1s'],
+                state['delta_ask_volume_1s']
+            )
+            
+            # 8. Kyle's Lambda (market impact coefficient)
+            if state['kyles_lambda_data']:
+                total_price_change = sum(d['price_change'] for d in state['kyles_lambda_data'])
+                total_signed_volume = sum(d['signed_volume'] for d in state['kyles_lambda_data'])
+                kyles_lambda_1s = calculate_kyles_lambda(total_price_change, total_signed_volume)
+            else:
+                kyles_lambda_1s = 0
+            
+            # 9. Volatility (from rolling metrics - already calculated)
+            volatility_1s = rolling_metrics['1s']['price_change_percent']
+            
+            # 10. Liquidity Health
+            liquidity_health_1s = calculate_liquidity_health(
+                depth_2pct_1s,
+                bid_ask_spread_1s,
+                abs(volatility_1s) if volatility_1s != 0 else 1
+            )
+            
             # Construct Kafka message
             kafka_message = {
                 'symbol': PRODUCT_ID,
@@ -214,6 +437,24 @@ async def send_to_kafka_periodically(producer, state):
                 'volume_24h_calculated': rolling_metrics['24h']['volume'],
                 'buy_volume_24h_calculated': rolling_metrics['24h']['buy_volume'],
                 'sell_volume_24h_calculated': rolling_metrics['24h']['sell_volume'],
+                
+                # ===============================
+                # NEW MICROSTRUCTURE METRICS (1s)
+                # ===============================
+                'bid_ask_spread_1s': bid_ask_spread_1s,
+                'mid_price_1s': mid_price_1s,
+                'best_bid_1s': best_bid,
+                'best_ask_1s': best_ask,
+                'depth_2pct_1s': depth_2pct_1s,
+                'bid_depth_2pct_1s': bid_depth_2pct_1s,
+                'ask_depth_2pct_1s': ask_depth_2pct_1s,
+                'vwap_1s': vwap_1s,
+                'micro_price_deviation_1s': avg_micro_price_deviation_1s,
+                'cvd_1s': cvd_1s,
+                'ofi_1s': ofi_1s,
+                'kyles_lambda_1s': kyles_lambda_1s,
+                'liquidity_health_1s': liquidity_health_1s,
+                
                 'ingestion_time': datetime.now(EASTERN).isoformat()  # EST timezone
             }
             
@@ -221,6 +462,10 @@ async def send_to_kafka_periodically(producer, state):
             state['buy_volume_1s'] = 0.0
             state['sell_volume_1s'] = 0.0
             state['trade_count_1s'] = 0
+            state['trades_1s'].clear()
+            state['kyles_lambda_data'].clear()
+            state['delta_bid_volume_1s'] = 0.0
+            state['delta_ask_volume_1s'] = 0.0
             
             # Send to Kafka
             producer.produce(
@@ -235,8 +480,12 @@ async def send_to_kafka_periodically(producer, state):
             
             if state['message_count'] % 10 == 0:
                 logger.info(
-                    f"Sent {state['message_count']} | Price: ${kafka_message['price']:.2f} | "
-                    f"Vol: {kafka_message['volume_1s']:.4f} | Buy/Sell: {kafka_message['buy_sell_volume_ratio_1s']:.2f}"
+                    f"📤 Sent {state['message_count']} | "
+                    f"Price: ${kafka_message['price']:.2f} | "
+                    f"Spread: ${kafka_message['bid_ask_spread_1s']:.2f} | "
+                    f"Vol: {kafka_message['volume_1s']:.4f} | "
+                    f"Depth: {kafka_message['depth_2pct_1s']:.2f} BTC | "
+                    f"OFI: {kafka_message['ofi_1s']:.4f}"
                 )
         
         # Sleep to maintain exact 1-second intervals
@@ -300,22 +549,34 @@ async def stream_coinbase_to_kafka():
         'high_24h': 0.0,
         'low_24h': float('inf'),
         'last_trade_time': time.time(),  # Track last trade for health check
-        'should_reconnect': False  # Flag to trigger reconnect
+        'should_reconnect': False,  # Flag to trigger reconnect
+        
+        # Order book state
+        'order_book': {'bids': [], 'asks': []},
+        
+        # Microstructure metrics state
+        'trades_1s': [],  # Store trades for VWAP calculation
+        'cvd': 0.0,  # Cumulative Volume Delta (persistent across windows)
+        'delta_bid_volume_1s': 0.0,  # For OFI calculation
+        'delta_ask_volume_1s': 0.0,
+        'previous_price': 0.0,  # For Kyle's Lambda
+        'kyles_lambda_data': [],  # Store price changes and signed volumes
     }
     
     try:
         async with websockets.connect(COINBASE_WS_URL) as websocket:
-            # Subscribe to ticker and matches only (no order book to avoid connection issues)
+            # Subscribe to ticker, matches, and Level 2 order book
             subscribe_message = {
                 "type": "subscribe",
                 "product_ids": [PRODUCT_ID],
                 "channels": [
                     "ticker",
-                    "matches"
+                    "matches",
+                    "level2"  # Add Level 2 order book for microstructure metrics
                 ]
             }
             await websocket.send(json.dumps(subscribe_message))
-            logger.info(f"Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches")
+            logger.info(f"Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches, level2")
             
             # Run all tasks concurrently (receive, send, health check)
             await asyncio.gather(

@@ -73,20 +73,65 @@ Each Kafka message contains the following fields (using Coinbase data):
 | `number_of_trades` | int | Number of trades in 1 second | **Feature: Real-time trading intensity** |
 | `buy_sell_ratio` | float | Buy/Sell volume ratio (1s) | **Key Feature: >1 = buying pressure** |
 
-### Notes on Data Availability
-- **Order book data NOT available**: Coinbase WebSocket connection issues prevented order book streaming
-- **Focus on trade data**: Using real-time matches (trades) for volume and price analysis
-- **No bid/ask spread**: Not collecting order book depth metrics
+### Microstructure Metrics (Level 2 Order Book) - NEW!
+
+#### 1-Second Window
+| Field | Type | Description | Use for ML |
+|-------|------|-------------|------------|
+| **`bid_ask_spread_1s`** | float | **Best Ask - Best Bid** | **Key Feature: Liquidity cost** |
+| **`mid_price_1s`** | float | **(Best Bid + Best Ask) / 2** | **Feature: Fair value estimate** |
+| **`best_bid_1s`** | float | **Highest bid price** | Feature: Top of book |
+| **`best_ask_1s`** | float | **Lowest ask price** | Feature: Top of book |
+| **`depth_2pct_1s`** | float | **Total volume within ±2% of mid-price** | **Key Feature: Available liquidity** |
+| `bid_depth_2pct_1s` | float | Bid volume within 2% range | Feature: Buy-side liquidity |
+| `ask_depth_2pct_1s` | float | Ask volume within 2% range | Feature: Sell-side liquidity |
+| **`vwap_1s`** | float | **Volume-weighted average trade price** | **Feature: Execution quality** |
+| **`micro_price_deviation_1s`** | float | **Avg(Trade Price - Mid-Price)** | **Key Feature: Aggressive order flow** |
+| **`cvd_1s`** | float | **Cumulative (Buy Vol - Sell Vol)** | **Key Feature: Net accumulation/distribution** |
+| **`ofi_1s`** | float | **Order Flow Imbalance: ΔBid Vol - ΔAsk Vol** | **🔥 Leading Indicator: Predicts price movement** |
+| **`kyles_lambda_1s`** | float | **Market impact: ΔPrice / Signed Volume** | **Feature: Liquidity depth measure** |
+| **`liquidity_health_1s`** | float | **Depth / (Spread × Volatility)** | **Feature: Composite market quality** |
+
+#### 1-Minute Aggregated
+| Field | Type | Description | Use for ML |
+|-------|------|-------------|------------|
+| `avg_bid_ask_spread_1m` | float | Average spread over 1 minute | Feature: Average liquidity cost |
+| `avg_depth_2pct_1m` | float | Average total depth | Feature: Average liquidity |
+| `avg_bid_depth_2pct_1m` | float | Average bid depth | Feature: Buy-side liquidity trend |
+| `avg_ask_depth_2pct_1m` | float | Average ask depth | Feature: Sell-side liquidity trend |
+| `avg_vwap_1m` | float | Average VWAP | Feature: Average execution price |
+| `avg_micro_price_deviation_1m` | float | Average price deviation | Feature: Persistent order flow direction |
+| `cvd_1m` | float | Latest CVD (cumulative) | **Key Feature: Net position** |
+| `total_ofi_1m` | float | Sum of OFI over 1 minute | Feature: Total order flow pressure |
+| `avg_ofi_1m` | float | Average OFI | Feature: Average order flow |
+| `avg_kyles_lambda_1m` | float | Average market impact | Feature: Average liquidity depth |
+| `avg_liquidity_health_1m` | float | Average liquidity health | Feature: Market quality trend |
+| `avg_mid_price_1m` | float | Average mid-price | Feature: Fair value over window |
+| `latest_best_bid_1m` | float | Best bid at end of minute | Feature: Latest top of book |
+| `latest_best_ask_1m` | float | Best ask at end of minute | Feature: Latest top of book |
+| `volatility_regime` | string | Classification: "low", "medium", "high" | **Feature: Market state** |
+
+### Data Sources
+- **Trade data**: Real-time matches (trades) from Coinbase WebSocket
+- **Order book data**: Level 2 snapshots and updates from Coinbase WebSocket
+- **Ticker data**: 24-hour statistics from Coinbase WebSocket
+- **Order book depth**: Top 50 bid/ask levels maintained in memory
 
 ## Key Features for Dynamic Pricing Model
 
 ### Primary Indicators (Multi-Timeframe Analysis)
 
-#### Immediate (1-Second)
-1. **`price`** - What you're predicting
-2. **`buy_sell_volume_ratio_1s`** - >1 = more buying RIGHT NOW (strongest real-time signal)
-3. **`volume_1s`** - Immediate trading activity (spike = price movement coming)
-4. **`trade_count_1s`** - High trade count = market is active/volatile
+#### Immediate (1-Second) - UPDATED WITH MICROSTRUCTURE METRICS
+1. **`ofi_1s`** - 🔥 **LEADING INDICATOR** (predicts price before it moves!)
+2. **`price`** - What you're predicting
+3. **`micro_price_deviation_1s`** - Aggressive buying/selling pressure
+4. **`bid_ask_spread_1s`** - Liquidity cost (lower = better)
+5. **`depth_2pct_1s`** - Available liquidity (higher = better)
+6. **`buy_sell_volume_ratio_1s`** - >1 = more buying RIGHT NOW
+7. **`cvd_1s`** - Cumulative net buying/selling
+8. **`volume_1s`** - Immediate trading activity
+9. **`trade_count_1s`** - High trade count = market is active/volatile
+10. **`liquidity_health_1s`** - Overall market quality
 
 #### Short-Term (1-Minute)
 5. **`price_change_percent_1min`** - Immediate price momentum
