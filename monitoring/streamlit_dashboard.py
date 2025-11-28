@@ -1,6 +1,7 @@
 """
 BTC 1-Minute Live Dashboard
 Monitors BTC price and metrics with 1-minute updates from GCS
+ALL TIMES ARE IN EASTERN TIME (EST/EDT)
 """
 
 import streamlit as st
@@ -9,7 +10,7 @@ from google.cloud import storage
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import pytz
 
 # Page configuration
@@ -20,9 +21,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Eastern Time Zone - ALL times are in EST
+EASTERN = pytz.timezone('America/New_York')
+
 # Title
 st.title("₿ Bitcoin Live Dashboard - 1-Minute Updates")
 st.markdown("Real-time cryptocurrency data aggregated every minute")
+
+# Display current time in EST
+now_est = datetime.now(EASTERN)
+st.markdown(f"**🕐 Current Time (EST):** {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # Initialize session state for timeline persistence
 if 'selected_timeline' not in st.session_state:
@@ -71,9 +79,6 @@ BUCKET_NAME = 'crypto-db-east1'
 PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
-# Eastern Time Zone
-EASTERN = pytz.timezone('America/New_York')
-
 @st.cache_data(ttl=10)  # Cache for 10 seconds for more frequent updates
 def load_data_from_gcs(time_bucket, max_files, timeline):
     """Load latest parquet files from GCS
@@ -117,25 +122,25 @@ def load_data_from_gcs(time_bucket, max_files, timeline):
         
         bucket = client.bucket(BUCKET_NAME)
         
-        # Calculate date range based on timeline - need to load data from correct time range
-        now_utc = datetime.now(timezone.utc)
+        # Calculate date range based on timeline - ALL IN EASTERN TIME
+        now_est = datetime.now(EASTERN)
         
         # For longer timeframes, we need to load from previous day(s) too
         blobs = []
         
         if timeline in ["1 Hour", "30 Minutes", "15 Minutes", "5 Minutes"]:
-            # Only need today's data
-            today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
-            st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+            # Only need today's data (EST)
+            today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
+            st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
             st.sidebar.warning(f"🔍 Searching: {today_prefix}...")
             blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=200))
         else:
-            # 1 Day - need today AND yesterday
-            today_prefix = f"year={now_utc.year}/month={now_utc.month:02d}/day={now_utc.day:02d}/"
-            yesterday = now_utc - timedelta(days=1)
-            yesterday_prefix = f"year={yesterday.year}/month={yesterday.month:02d}/day={yesterday.day:02d}/"
+            # 1 Day - need today AND yesterday (EST)
+            today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
+            yesterday_est = now_est - timedelta(days=1)
+            yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
             
-            st.sidebar.text(f"🕐 UTC Now: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+            st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
             st.sidebar.warning(f"🔍 Searching: {today_prefix} + {yesterday_prefix}...")
             
             # Load from both days
@@ -227,53 +232,39 @@ with st.spinner("Loading latest data from GCS..."):
     df_full = load_data_from_gcs(current_time_bucket, MAX_FILES, timeline_option)
 
 if df_full is not None and not df_full.empty:
-    # Filter data by selected timeframe
-    now = datetime.now(EASTERN)
+    # Filter data by selected timeframe - ALL IN EASTERN TIME
+    now_est = datetime.now(EASTERN).replace(tzinfo=None)  # Naive EST
     
-    # Calculate cutoff time based on timeline selection
+    # Calculate cutoff time based on timeline selection (EST)
     if timeline_option == "5 Minutes":
-        cutoff_time = now - timedelta(minutes=5)
+        cutoff_time = now_est - timedelta(minutes=5)
     elif timeline_option == "15 Minutes":
-        cutoff_time = now - timedelta(minutes=15)
+        cutoff_time = now_est - timedelta(minutes=15)
     elif timeline_option == "30 Minutes":
-        cutoff_time = now - timedelta(minutes=30)
+        cutoff_time = now_est - timedelta(minutes=30)
     elif timeline_option == "1 Hour":
-        cutoff_time = now - timedelta(hours=1)
+        cutoff_time = now_est - timedelta(hours=1)
     else:  # 1 Day
-        cutoff_time = now - timedelta(hours=24)
+        cutoff_time = now_est - timedelta(hours=24)
     
-    # Debug: Show cutoff time (in Eastern)
-    st.sidebar.text(f"DEBUG: Now ET: {now.strftime('%H:%M:%S')}")
-    st.sidebar.text(f"DEBUG: Cutoff ET: {cutoff_time.strftime('%H:%M:%S')}")
+    # Convert window_start from Unix timestamp (milliseconds) to datetime
+    # The aggregator stores window_start as EST timestamp in milliseconds
+    df_full['window_start'] = pd.to_datetime(df_full['window_start'], unit='ms')
     
-    # Convert window_start from UTC to Eastern time for comparison
-    df_full['window_start_et'] = pd.to_datetime(df_full['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
-    cutoff_time_naive = cutoff_time.replace(tzinfo=None)
-    
-    # Debug: show data range in ET
-    st.sidebar.text(f"DEBUG: Data min ET: {df_full['window_start_et'].min().strftime('%H:%M:%S')}")
-    st.sidebar.text(f"DEBUG: Data max ET: {df_full['window_start_et'].max().strftime('%H:%M:%S')}")
-    
-    df = df_full[df_full['window_start_et'] >= cutoff_time_naive].copy()
+    # Filter data
+    df = df_full[df_full['window_start'] >= cutoff_time].copy()
     
     if df.empty:
         st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
         df = df_full.copy()
-        # Also convert window_start for fallback case
-        if 'window_start_et' not in df.columns:
-            df['window_start_et'] = pd.to_datetime(df['window_start']).dt.tz_localize('UTC').dt.tz_convert(EASTERN).dt.tz_localize(None)
-    
-    # Use Eastern time for all displays
-    df['window_start'] = df['window_start_et']
     
     st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
     
-    # Display last update time - already in Eastern (naive), just display it
-    last_update_et = df['window_start'].max()
-    now_eastern = datetime.now(EASTERN).replace(tzinfo=None)
-    data_age_seconds = (now_eastern - pd.Timestamp(last_update_et).to_pydatetime()).total_seconds()
+    # Display last update time - in EST
+    last_update_est = df['window_start'].max()
+    data_age_seconds = (now_est - pd.Timestamp(last_update_est).to_pydatetime()).total_seconds()
     
-    st.sidebar.success(f"Last Data: {last_update_et.strftime('%Y-%m-%d %H:%M:%S')} ET")
+    st.sidebar.success(f"Last Data: {last_update_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
     
     # Show data freshness
@@ -352,7 +343,7 @@ if df_full is not None and not df_full.empty:
     )])
     
     fig_price.update_layout(
-        xaxis_title="Time",
+        xaxis_title="Time (EST)",
         yaxis_title="Price (USD)",
         height=400,
         xaxis_rangeslider_visible=False,
@@ -388,7 +379,7 @@ if df_full is not None and not df_full.empty:
     )
     
     fig_volume.update_layout(height=600, showlegend=True, hovermode='x unified')
-    fig_volume.update_xaxes(title_text="Time", row=2, col=1)
+    fig_volume.update_xaxes(title_text="Time (EST)", row=2, col=1)
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=1, col=1)
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=2, col=1)
     

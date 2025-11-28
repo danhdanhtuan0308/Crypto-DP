@@ -1,6 +1,7 @@
 """
 GCS Parquet Writer
 Consumes from btc_1min_agg topic and writes Parquet files to GCS
+ALL FILE PATHS USE EASTERN TIME (EST/EDT)
 """
 
 import json
@@ -14,6 +15,7 @@ import pyarrow.parquet as pq
 from dotenv import load_dotenv
 import logging
 import time
+import pytz
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,6 +25,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# Eastern Time Zone - ALL file paths will use EST
+EASTERN = pytz.timezone('America/New_York')
 
 # Configuration
 KAFKA_CONFIG = {
@@ -95,14 +100,14 @@ class ParquetWriter:
             # Convert to DataFrame
             df = pd.DataFrame(self.buffer)
             
-            # Generate file path
-            timestamp = datetime.now(timezone.utc)
+            # Generate file path using EASTERN TIME
+            timestamp = datetime.now(EASTERN)
             year = timestamp.strftime('%Y')
             month = timestamp.strftime('%m')
             day = timestamp.strftime('%d')
             hour = timestamp.strftime('%H')
             
-            # Path format: year=2025/month=11/day=25/hour=19/btc_1min_agg+0+0000000001.parquet
+            # Path format: year=2025/month=11/day=25/hour=19/btc_1min_agg+0+0000000001.parquet (EST)
             file_name = f"btc_1min_agg+0+{self.file_count:010d}.snappy.parquet"
             blob_path = f"year={year}/month={month}/day={day}/hour={hour}/{file_name}"
             
@@ -125,7 +130,7 @@ class ParquetWriter:
             )
             
             logger.info(
-                f"✅ Uploaded: gs://{self.bucket_name}/{blob_path} "
+                f"✅ Uploaded: gs://{self.bucket_name}/{blob_path} (EST) "
                 f"({len(self.buffer)} rows, {blob.size / 1024:.2f} KB)"
             )
             

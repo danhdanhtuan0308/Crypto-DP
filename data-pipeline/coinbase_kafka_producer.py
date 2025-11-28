@@ -8,6 +8,7 @@ from confluent_kafka import Producer
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
+import pytz
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,6 +18,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# Eastern Time Zone - ALL timestamps will be in EST
+EASTERN = pytz.timezone('America/New_York')
 
 # Setting up Kafka configuration
 KAFKA_CONFIG = {
@@ -210,7 +214,7 @@ async def send_to_kafka_periodically(producer, state):
                 'volume_24h_calculated': rolling_metrics['24h']['volume'],
                 'buy_volume_24h_calculated': rolling_metrics['24h']['buy_volume'],
                 'sell_volume_24h_calculated': rolling_metrics['24h']['sell_volume'],
-                'ingestion_time': datetime.now(timezone.utc).isoformat()
+                'ingestion_time': datetime.now(EASTERN).isoformat()  # EST timezone
             }
             
             # Reset 1s counters

@@ -2,6 +2,7 @@
 1-Minute Aggregation Consumer
 Reads from BTC-USD topic (1 msg/sec) and aggregates into 1-minute windows
 Produces to btc_1min_agg topic (1 msg/min)
+ALL TIMESTAMPS IN EASTERN TIME (EST/EDT)
 """
 
 import json
@@ -13,6 +14,7 @@ from confluent_kafka import Consumer, Producer
 import os
 from dotenv import load_dotenv
 import logging
+import pytz
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# Eastern Time Zone - ALL timestamps will be in EST
+EASTERN = pytz.timezone('America/New_York')
 
 # Kafka configuration
 KAFKA_CONFIG = {
@@ -58,20 +63,25 @@ def delivery_callback(err, msg):
 class MinuteAggregator:
     def __init__(self):
         self.window_data = deque(maxlen=60)  # Store up to 60 seconds
-        self.window_start = None
+        self.window_start = None  # Will store EST datetime
         self.message_count = 0
+    
+    def _get_est_minute(self):
+        """Get current minute rounded down in EST"""
+        now_est = datetime.now(EASTERN)
+        # Round down to minute (remove seconds and microseconds)
+        return now_est.replace(second=0, microsecond=0)
         
     def add_tick(self, data):
         """Add a 1-second tick to the current window"""
-        current_time = time.time()
+        current_minute_est = self._get_est_minute()
         
         # Initialize window start
         if self.window_start is None:
-            self.window_start = int(current_time // 60) * 60  # Round down to minute
+            self.window_start = current_minute_est
         
         # Check if we need to flush (new minute started)
-        current_minute = int(current_time // 60) * 60
-        if current_minute > self.window_start:
+        if current_minute_est > self.window_start:
             return self.flush()
         
         # Add to current window
@@ -141,13 +151,15 @@ class MinuteAggregator:
         buy_sell_ratios = [d.get('buy_sell_ratio', 0) for d in self.window_data if d.get('buy_sell_ratio', 0) > 0]
         avg_buy_sell_ratio_1m = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0.0
         
-        # Build aggregated message
-        window_end = self.window_start + 60000  # +60 seconds in ms
+        # Build aggregated message - window_start is EST datetime, convert to milliseconds
+        window_start_ms = int(self.window_start.timestamp() * 1000)
+        window_end_ms = window_start_ms + 60000  # +60 seconds in ms
         
         agg_message = {
             'symbol': latest_data.get('symbol', 'BTC-USD'),
-            'window_start': self.window_start * 1000,  # Convert to milliseconds
-            'window_end': window_end,
+            'window_start': window_start_ms,  # EST timestamp in milliseconds
+            'window_end': window_end_ms,
+            'window_start_est': self.window_start.strftime('%Y-%m-%d %H:%M:%S'),  # Human-readable EST
             
             # OHLC
             'open': open_price,
@@ -175,12 +187,12 @@ class MinuteAggregator:
             'price_change_1m': price_change_1m,
             'price_change_percent_1m': price_change_percent_1m,
             'num_ticks': len(self.window_data),
-            'last_ingestion_time': latest_data.get('ingestion_time', datetime.now(timezone.utc).isoformat())
+            'last_ingestion_time': latest_data.get('ingestion_time', datetime.now(EASTERN).isoformat())
         }
         
         # Reset for next window
         self.window_data.clear()
-        self.window_start = int(time.time() // 60) * 60
+        self.window_start = self._get_est_minute()
         self.message_count += 1
         
         return agg_message
@@ -203,9 +215,9 @@ def main():
             msg = consumer.poll(1.0)
             
             if msg is None:
-                # Check if we need to flush due to timeout
-                current_time = time.time()
-                if aggregator.window_start and current_time - aggregator.window_start >= 60:
+                # Check if we need to flush due to timeout (new minute started)
+                current_minute_est = aggregator._get_est_minute()
+                if aggregator.window_start and current_minute_est > aggregator.window_start:
                     agg_msg = aggregator.flush()
                     if agg_msg:
                         producer.produce(
@@ -217,6 +229,7 @@ def main():
                         producer.poll(0)
                         logger.info(
                             f"Aggregated minute {aggregator.message_count} | "
+                            f"EST: {agg_msg['window_start_est']} | "
                             f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                             f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "
                             f"Vol: {agg_msg['total_volume_1m']:.4f} | "
@@ -247,6 +260,7 @@ def main():
                     producer.poll(0)
                     logger.info(
                         f"Aggregated minute {aggregator.message_count} | "
+                        f"EST: {agg_msg['window_start_est']} | "
                         f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                         f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "
                         f"Vol: {agg_msg['total_volume_1m']:.4f} | "
