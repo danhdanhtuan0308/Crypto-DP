@@ -142,43 +142,67 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
         # Calculate date range based on timeline - ALL IN EASTERN TIME
         now_est = datetime.now(EASTERN)
         
-        # For longer timeframes, we need to load from previous day(s) too
         blobs = []
         
-        # Load last 24 hours of data for "1 Day" timeline support
         st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Load from today and yesterday
-        today_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/"
-        yesterday_est = now_est - timedelta(days=1)
-        yesterday_prefix = f"year={yesterday_est.year}/month={yesterday_est.month:02d}/day={yesterday_est.day:02d}/"
-        
-        st.sidebar.warning(f"🔍 Loading: {today_prefix} + yesterday...")
-        
-        # Load both days with reasonable limits to avoid API throttling
-        # 1 file per minute = 1440 files per day max
-        today_blobs = list(bucket.list_blobs(prefix=today_prefix, max_results=1500))
-        yesterday_blobs = list(bucket.list_blobs(prefix=yesterday_prefix, max_results=1500))
-        blobs = today_blobs + yesterday_blobs
-        
-        st.sidebar.info(f"📅 Today: {len(today_blobs)}, Yesterday: {len(yesterday_blobs)} files")
-        
-        # Safety check: if too many files, something is wrong
-        if len(blobs) > 3000:
-            st.sidebar.error(f"⚠️ Too many files ({len(blobs)}), limiting to most recent 2000")
-            blobs = sorted(blobs, key=lambda x: x.time_created, reverse=True)[:2000]
-        
-        # If incremental load (since_time provided), filter to only new files
+        # INCREMENTAL LOAD: Only load NEW files (1-2 per minute)
         if since_time is not None:
             # Convert since_time to timezone-aware if needed
             if since_time.tzinfo is None:
                 since_time = pytz.UTC.localize(since_time)
             
-            initial_count = len(blobs)
-            # Add 60 second buffer to catch files that might have just been written
+            st.sidebar.info(f"⚡ Incremental load from {since_time.strftime('%H:%M:%S')} UTC")
+            
+            # Only check current hour folder for new files (most efficient)
+            current_hour_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
+            
+            # Also check previous hour in case we're at the hour boundary
+            prev_hour_est = now_est - timedelta(hours=1)
+            prev_hour_prefix = f"year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
+            
+            st.sidebar.text(f"🔍 Checking: {current_hour_prefix.split('/')[-2]}")
+            
+            # List only current and previous hour (max ~120 files, typically just 1-2 new)
+            current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
+            prev_hour_blobs = list(bucket.list_blobs(prefix=prev_hour_prefix, max_results=100))
+            all_blobs = current_hour_blobs + prev_hour_blobs
+            
+            # Filter to only files created AFTER since_time (with small buffer)
             since_time_with_buffer = since_time - timedelta(seconds=60)
-            blobs = [b for b in blobs if b.time_created.replace(tzinfo=pytz.UTC) > since_time_with_buffer]
-            st.sidebar.success(f"🔄 Incremental: {len(blobs)} new files (from {initial_count} total, buffer applied)")
+            blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) > since_time_with_buffer]
+            
+            st.sidebar.success(f"🔄 Found {len(blobs)} new files (checked {len(all_blobs)} total)")
+        
+        # FULL LOAD: Load rolling 24 hours (NOT entire yesterday!)
+        else:
+            st.sidebar.warning("📥 Full load: Rolling 24 hours...")
+            
+            # Calculate 24 hours ago from now
+            time_24h_ago = now_est - timedelta(hours=24)
+            
+            st.sidebar.text(f"📅 From: {time_24h_ago.strftime('%m/%d %H:%M')}")
+            st.sidebar.text(f"📅 To: {now_est.strftime('%m/%d %H:%M')}")
+            
+            # Load ONLY the specific hours we need (current hour + last 24 hours)
+            blobs = []
+            current_time = now_est
+            
+            # Go back hour by hour for 25 hours (buffer)
+            for i in range(25):
+                hour_time = current_time - timedelta(hours=i)
+                hour_prefix = f"year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
+                
+                # Load files from this specific hour only
+                hour_blobs = list(bucket.list_blobs(prefix=hour_prefix, max_results=100))
+                blobs.extend(hour_blobs)
+            
+            st.sidebar.info(f"📅 Loaded {len(blobs)} files from 25 hours (rolling window)")
+            
+            # Safety check: should be around 1440-1500 files for 24 hours
+            if len(blobs) > 2000:
+                st.sidebar.warning(f"⚠️ Limiting {len(blobs)} files to 1500 most recent")
+                blobs = sorted(blobs, key=lambda x: x.time_created, reverse=True)[:1500]
         
         # Handle different cases
         if not blobs:
