@@ -16,7 +16,6 @@ import pytz
 # Page configuration
 st.set_page_config(
     page_title="BTC Live Dashboard",
-    page_icon="₿",
     layout="wide",
     initial_sidebar_state="expanded"
 )

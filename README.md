@@ -4,7 +4,6 @@ Overview : Data Pipeline from Coinbase Websocket -> Kafka Topic then fan-out to 
 
 ## Data Pipeline
 
-### Completed Steps
 **Coinbase WebSocket → Kafka Producer**
    - Streaming BTC/USDT market data from Coinbase WebSocket
    - 54 metrics per message (price, volume, order book, rolling calculations)
@@ -24,7 +23,9 @@ Overview : Data Pipeline from Coinbase Websocket -> Kafka Topic then fan-out to 
    - Organized in hourly folders: `year=YYYY/month=MM/day=DD/hour=HH/`
    - Snappy compression for efficient storage
 
-**Streamlit Dashboard**
+## Streamlit Dashboard
+
+**Dashboard**
    - Live BTC monitoring with OHLC charts, volume analysis, volatility tracking
    - Auto-refresh every 60 seconds, displays full day of 1-minute data
    - Deployed on Railway with parallel file loading from GCS
