@@ -21,30 +21,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS to prevent text shadows and duplicates
-st.markdown("""
-    <style>
-    /* Prevent text shadows and duplicates */
-    .stMarkdown, .stText, .stCaption {
-        text-shadow: none !important;
-    }
-    /* Ensure no duplicate rendering */
-    [data-testid="stMarkdownContainer"] {
-        opacity: 1 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 # Eastern Time Zone - ALL times are in EST
 EASTERN = pytz.timezone('America/New_York')
 
 # Title
-st.title("₿ Bitcoin Live Dashboard - 1-Minute Updates")
-st.markdown("Real-time cryptocurrency data aggregated every minute")
-
-# Display current time in EST
-now_est = datetime.now(EASTERN)
-st.markdown(f"**🕐 Current Time (EST):** {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
+st.title("Bitcoin Live Dashboard")
+st.caption("Real-time BTC data aggregated every minute")
 
 # Initialize session state for timeline persistence and last refresh time
 if 'selected_timeline' not in st.session_state:
@@ -61,17 +43,17 @@ if 'last_full_reload' not in st.session_state:
 # Sidebar configuration
 st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
-st.sidebar.info(f"⏱️ Auto-refresh: Every {refresh_interval} seconds")
+st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 
 # Clear cache button
-if st.sidebar.button("🗑️ Clear Cache"):
+if st.sidebar.button("Clear Cache"):
     st.cache_data.clear()
     st.session_state.cached_dataframe = None
     st.session_state.last_loaded_time = None
     st.rerun()
 
-# Timeline selector (like TradingView)
-st.sidebar.subheader("📊 Chart Timeline")
+# Timeline selector
+st.sidebar.subheader("Chart Timeline")
 timeline_options = ["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "1 Day"]
 current_index = timeline_options.index(st.session_state.selected_timeline) if st.session_state.selected_timeline in timeline_options else 3
 
@@ -113,55 +95,35 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
         # Try environment variable first (Railway, local)
         creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
         
-        # Debug: Check if env var exists
+        # Setup credentials
         if creds_json:
-            st.sidebar.success(f"✅ Found GCP_SERVICE_ACCOUNT_JSON ({len(creds_json)} chars)")
-            # Using environment variable (Railway/local)
             from google.oauth2 import service_account
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
-            st.sidebar.info(f"🔑 Using service account: {creds_dict.get('client_email', 'unknown')}")
         elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-            # Streamlit Cloud - use secrets
-            st.sidebar.info("🔑 Using Streamlit secrets")
             from google.oauth2 import service_account
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         else:
-            # Fall back to default credentials (local with GOOGLE_APPLICATION_CREDENTIALS)
-            st.sidebar.error("❌ GCP_SERVICE_ACCOUNT_JSON not found!")
-            st.sidebar.error("⚠️ Falling back to default credentials (will likely fail)")
-            st.error("**CONFIGURATION ERROR**: Set GCP_SERVICE_ACCOUNT_JSON in Railway environment variables!")
+            st.error("GCP credentials not found. Set GCP_SERVICE_ACCOUNT_JSON environment variable.")
             client = storage.Client(project=GCP_PROJECT_ID)
         
         bucket = client.bucket(BUCKET_NAME)
-        
-        # Calculate date range based on timeline - ALL IN EASTERN TIME
         now_est = datetime.now(EASTERN)
-        
         blobs = []
-        
-        st.sidebar.text(f"🕐 EST Now: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # INCREMENTAL LOAD: Only load NEW files (1-2 per minute)
         if since_time is not None:
-            # Convert since_time to timezone-aware if needed
             if since_time.tzinfo is None:
                 since_time = pytz.UTC.localize(since_time)
             
-            st.sidebar.info(f"⚡ Incremental load from {since_time.strftime('%H:%M:%S')} UTC")
-            
-            # Only check current hour folder for new files (most efficient)
+            # Only check current hour + previous hour folders
             current_hour_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
-            
-            # Also check previous hour in case we're at the hour boundary
             prev_hour_est = now_est - timedelta(hours=1)
             prev_hour_prefix = f"year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
-            
-            st.sidebar.text(f"🔍 Checking: {current_hour_prefix.split('/')[-2]}")
             
             # List only current and previous hour (max ~120 files, typically just 1-2 new)
             current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
@@ -172,149 +134,88 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             since_time_with_buffer = since_time - timedelta(seconds=60)
             blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) > since_time_with_buffer]
             
-            st.sidebar.success(f"🔄 Found {len(blobs)} new files (checked {len(all_blobs)} total)")
+            st.sidebar.info(f"Incremental: {len(blobs)} new files")
         
-        # FULL LOAD: Load rolling 24 hours (NOT entire yesterday!)
+        # FULL LOAD: Load rolling 24 hours
         else:
-            st.sidebar.warning("📥 Full load: Rolling 24 hours...")
-            
-            # Calculate 24 hours ago from now
-            time_24h_ago = now_est - timedelta(hours=24)
-            
-            st.sidebar.text(f"📅 From: {time_24h_ago.strftime('%m/%d %H:%M')}")
-            st.sidebar.text(f"📅 To: {now_est.strftime('%m/%d %H:%M')}")
+            st.sidebar.info("Full load: Rolling 24 hours")
             
             # Load ONLY the specific hours we need (current hour + last 24 hours)
-            blobs = []
-            current_time = now_est
-            
-            # Go back hour by hour for 25 hours (buffer)
             for i in range(25):
-                hour_time = current_time - timedelta(hours=i)
+                hour_time = now_est - timedelta(hours=i)
                 hour_prefix = f"year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
-                
-                # Load files from this specific hour only
                 hour_blobs = list(bucket.list_blobs(prefix=hour_prefix, max_results=100))
                 blobs.extend(hour_blobs)
             
-            st.sidebar.info(f"📅 Loaded {len(blobs)} files from 25 hours (rolling window)")
-            
             # Safety check: should be around 1440-1500 files for 24 hours
             if len(blobs) > 2000:
-                st.sidebar.warning(f"⚠️ Limiting {len(blobs)} files to 1500 most recent")
                 blobs = sorted(blobs, key=lambda x: x.time_created, reverse=True)[:1500]
         
         # Handle different cases
         if not blobs:
             if since_time is not None:
-                # Incremental load found no new files - return empty DataFrame
-                st.sidebar.info("ℹ️ No new files to load")
                 return pd.DataFrame()
             else:
-                # First load found no files - error
-                st.error(f"❌ No data found in gs://{BUCKET_NAME}/{PREFIX}")
-                st.code(f"Expected path: gs://{BUCKET_NAME}/year=2025/month=11/day=27/...")
+                st.error(f"No data found in gs://{BUCKET_NAME}/{PREFIX}")
                 return None
         
-        # Sort by creation time - take most recent
+        # Sort by creation time and limit
         blobs_sorted = sorted(blobs, key=lambda x: x.time_created, reverse=True)
-        
-        # Smart limit based on whether this is incremental or full load
-        if since_time is not None:
-            # Incremental load - should be just a few files
-            max_load = min(len(blobs_sorted), 100)  # At most 100 new files
-        else:
-            # Full load - need up to 24h of data (1440 minutes)
-            max_load = min(len(blobs_sorted), 1500)
-        
+        max_load = min(len(blobs_sorted), 100 if since_time is not None else 1500)
         latest_blobs = blobs_sorted[:max_load]
         
-        st.sidebar.success(f"✅ Found {len(blobs)} files, loading {len(latest_blobs)}...")
-        
-        # Read parquet files in parallel using ThreadPoolExecutor
+        # Read parquet files in parallel
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import io
         
         dfs = []
-        progress_text = st.sidebar.empty()
-        progress_bar = st.progress(0)
         
         def load_blob(blob):
-            """Load a single blob and return dataframe"""
             try:
-                # Download blob content to memory first (faster)
                 blob_data = blob.download_as_bytes()
-                df = pd.read_parquet(io.BytesIO(blob_data))
-                return df, blob.name
-            except Exception as e:
-                return None, f"Error: {str(e)[:50]}"
+                return pd.read_parquet(io.BytesIO(blob_data))
+            except:
+                return None
         
-        # Load files in parallel (up to 3 at a time)
-        loaded = 0
         with ThreadPoolExecutor(max_workers=3) as executor:
-            future_to_blob = {executor.submit(load_blob, blob): blob for blob in latest_blobs}
-            
-            for future in as_completed(future_to_blob):
-                df, info = future.result()
-                loaded += 1
-                
+            futures = [executor.submit(load_blob, blob) for blob in latest_blobs]
+            for future in as_completed(futures):
+                df = future.result()
                 if df is not None:
                     dfs.append(df)
-                    progress_text.text(f"✅ Loaded {loaded}/{len(latest_blobs)} files")
-                else:
-                    progress_text.text(f"⚠️ Skipped 1 file - {loaded}/{len(latest_blobs)}")
-                
-                progress_bar.progress(loaded / len(latest_blobs))
-        
-        progress_bar.empty()
-        progress_text.empty()
         
         if not dfs:
             st.error("No valid parquet files found")
             return None
         
-        # Combine all dataframes
+        # Combine and process dataframes
         combined_df = pd.concat(dfs, ignore_index=True)
-        
-        # Explicitly clear the dfs list to free memory
         del dfs
         
-        # Convert timestamps from UTC milliseconds to EST datetime
-        # The aggregator stores window_start as UTC Unix timestamp in milliseconds
-        # We need to convert to EST for proper comparison with current time
-        combined_df['window_start'] = pd.to_datetime(combined_df['window_start'], unit='ms', utc=True)
-        combined_df['window_end'] = pd.to_datetime(combined_df['window_end'], unit='ms', utc=True)
+        # Convert timestamps from UTC milliseconds to EST
+        combined_df['window_start'] = pd.to_datetime(combined_df['window_start'], unit='ms', utc=True).dt.tz_convert(EASTERN)
+        combined_df['window_end'] = pd.to_datetime(combined_df['window_end'], unit='ms', utc=True).dt.tz_convert(EASTERN)
         
-        # Convert from UTC to EST
-        combined_df['window_start'] = combined_df['window_start'].dt.tz_convert(EASTERN)
-        combined_df['window_end'] = combined_df['window_end'].dt.tz_convert(EASTERN)
-        
-        # Sort by timestamp
+        # Sort and remove duplicates
         combined_df = combined_df.sort_values('window_start', ascending=True)
-        
-        # Remove duplicates
         combined_df = combined_df.drop_duplicates(subset=['window_start'], keep='last')
         
-        # Apply 24h cutoff immediately to save memory
+        # Apply 24h cutoff
         cutoff = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
         combined_df = combined_df[combined_df['window_start'] >= cutoff].copy()
-        
-        st.sidebar.info(f"📊 Returning {len(combined_df)} records after 24h filter")
         
         return combined_df
         
     except Exception as e:
-        error_msg = str(e)
-        st.error(f"Error loading data from GCS: {error_msg}")
+        st.error(f"Error loading data: {str(e)}")
         
-        # Retry logic with exponential backoff
+        # Retry logic
         if retry_count < max_retries:
-            wait_time = 2 ** retry_count  # 1s, 2s, 4s
-            st.warning(f"⏳ Retrying in {wait_time}s... (attempt {retry_count + 1}/{max_retries})")
+            wait_time = 2 ** retry_count
             time.sleep(wait_time)
             return load_new_data_from_gcs(since_time=since_time, retry_count=retry_count + 1)
         else:
-            st.error("❌ Max retries reached. Please check your GCS connection and credentials.")
+            st.error("Max retries reached. Check GCS connection.")
             return None
 
 # Smart incremental loading logic with periodic full reload
@@ -325,79 +226,48 @@ time_since_full_reload = time.time() - st.session_state.last_full_reload
 FULL_RELOAD_INTERVAL = 2 * 3600  # 2 hours in seconds
 
 if time_since_full_reload > FULL_RELOAD_INTERVAL:
-    st.sidebar.warning(f"♻️ Full reload (last: {time_since_full_reload/3600:.1f}h ago)")
-    # Force full reload
     st.session_state.cached_dataframe = None
     st.session_state.last_loaded_time = None
     st.session_state.last_full_reload = time.time()
 
 # Check if we have cached data
 if st.session_state.cached_dataframe is not None:
-    # Check cache size - if too large, force reload
+    # Check cache size
     cache_size_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
-    st.sidebar.text(f"💾 Cache: {len(st.session_state.cached_dataframe)} rows, {cache_size_mb:.1f}MB")
     
-    # Force reload if cache exceeds 100MB (safety limit)
     if cache_size_mb > 100:
-        st.sidebar.error(f"⚠️ Cache too large ({cache_size_mb:.1f}MB), forcing reload...")
         st.session_state.cached_dataframe = None
         st.session_state.last_loaded_time = None
         st.session_state.last_full_reload = time.time()
     else:
-        # We have cached data - just load NEW files since last load
-        st.sidebar.info("⚡ Using cached data + loading new files...")
-        # Add debug info
-        if st.session_state.last_loaded_time:
-            time_since_load = (datetime.now(pytz.UTC) - st.session_state.last_loaded_time).total_seconds()
-            st.sidebar.text(f"⏱️ Last load: {time_since_load:.0f}s ago")
-        with st.spinner("Loading new data..."):
-            new_df = load_new_data_from_gcs(since_time=st.session_state.last_loaded_time)
+        new_df = load_new_data_from_gcs(since_time=st.session_state.last_loaded_time)
         
         if new_df is not None and not new_df.empty:
-            # Merge new data with cached data
             df_full = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
-            
-            # Remove duplicates and sort
             df_full = df_full.sort_values('window_start', ascending=True)
             df_full = df_full.drop_duplicates(subset=['window_start'], keep='last')
             
-            # CRITICAL: Keep only last 24 hours (sliding window) - prevent infinite growth
-            cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)  # 24.5 hours buffer
+            # Keep only last 24 hours
+            cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
             df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
             
-            # Explicitly release memory from old cache
             del st.session_state.cached_dataframe
-            
-            # Update cache
             st.session_state.cached_dataframe = df_full
             st.session_state.last_loaded_time = datetime.now(pytz.UTC)
-            
-            load_time = time.time() - load_start
-            st.sidebar.success(f"✅ Added {len(new_df)} new, total: {len(df_full)} ({load_time:.1f}s)")
         else:
-            # No new data, use existing cache
             df_full = st.session_state.cached_dataframe
-            load_time = time.time() - load_start
-            st.sidebar.info(f"⚡ No new data, using cache ({load_time*1000:.0f}ms)")
 
 # First load or forced reload
 if st.session_state.cached_dataframe is None:
-    st.sidebar.warning("📥 Full load: Loading last 24 hours...")
-    with st.spinner("Loading data from GCS..."):
-        df_full = load_new_data_from_gcs(since_time=None)
+    df_full = load_new_data_from_gcs(since_time=None)
     
     if df_full is not None and not df_full.empty:
-        # Apply 24h cutoff immediately to prevent loading too much
         cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
         df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
         
-        # Cache the data
         st.session_state.cached_dataframe = df_full
         st.session_state.last_loaded_time = datetime.now(pytz.UTC)
-        load_time = time.time() - load_start
-        st.sidebar.success(f"📥 Loaded {len(df_full)} records ({load_time:.1f}s)")
     else:
-        load_time = time.time() - load_start
         df_full = None
 
 if df_full is not None and not df_full.empty:
@@ -420,43 +290,16 @@ if df_full is not None and not df_full.empty:
     # Filter data - window_start is already EST timezone-aware
     df = df_full[df_full['window_start'] >= cutoff_time].copy()
     
-    # Debug: Show data range vs cutoff
-    if not df_full.empty:
-        data_min = df_full['window_start'].min()
-        data_max = df_full['window_start'].max()
-        st.sidebar.text(f"📊 Data range: {data_min.strftime('%H:%M:%S')} - {data_max.strftime('%H:%M:%S')}")
-        st.sidebar.text(f"⏰ Cutoff: {cutoff_time.strftime('%H:%M:%S')}")
-    
     if df.empty:
-        st.warning(f"No data available for {timeline_option} (loaded {len(df_full)} records)")
-        # Show more debug info
-        if not df_full.empty:
-            st.info(f"Data timestamps range: {data_min.strftime('%Y-%m-%d %H:%M:%S')} to {data_max.strftime('%Y-%m-%d %H:%M:%S')} EST")
-            st.info(f"Looking for data after: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')} EST")
         df = df_full.copy()
     
-    st.sidebar.info(f"Records loaded: {len(df)} / {len(df_full)}")
-    
-    # Display last update time - in EST
+    # Display status
     last_update_est = df['window_start'].max()
-    # Convert now_est to pandas Timestamp for proper comparison
-    now_est_ts = pd.Timestamp(now_est)
-    data_age_seconds = (now_est_ts - last_update_est).total_seconds()
+    data_age_seconds = (pd.Timestamp(now_est) - last_update_est).total_seconds()
     
-    # Format for display (remove timezone info for cleaner display)
-    last_update_display = last_update_est.strftime('%Y-%m-%d %H:%M:%S')
-    st.sidebar.success(f"Last Data: {last_update_display} EST")
-    st.sidebar.info(f"⏱️ Timeframe: {timeline_option}")
-    
-    # Show data freshness
-    if data_age_seconds < 90:
-        st.sidebar.success(f"✅ Fresh data ({int(data_age_seconds)}s old)")
-    elif data_age_seconds < 180:
-        st.sidebar.warning(f"⚠️ Data is {int(data_age_seconds)}s old")
-    else:
-        st.sidebar.error(f"❌ Data is {int(data_age_seconds)}s old")
-    
-    st.sidebar.info(f"Records: {len(df)}")
+    st.sidebar.text(f"Last Update: {last_update_est.strftime('%H:%M:%S')}")
+    st.sidebar.text(f"Data Age: {int(data_age_seconds)}s")
+    st.sidebar.text(f"Records: {len(df)}")
     
     # Latest metrics
     latest = df.iloc[-1]
@@ -1098,48 +941,27 @@ if df_full is not None and not df_full.empty:
             else:
                 st.write("N/A")
     
-    # Auto-refresh logic using session state
+    # Auto-refresh
     st.sidebar.markdown("---")
     
-    # Memory usage display
     if st.session_state.cached_dataframe is not None:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
-        st.sidebar.text(f"💾 Memory: {mem_mb:.1f}MB / 100MB")
-        if mem_mb > 80:
-            st.sidebar.warning("⚠️ High memory usage!")
+        st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
     
-    # Check if it's time to refresh
     current_time = time.time()
     time_since_refresh = current_time - st.session_state.last_refresh_time
     
     if time_since_refresh >= refresh_interval:
-        # Time to refresh - DON'T clear cache, just reload page to fetch new data
         st.session_state.last_refresh_time = current_time
-        st.sidebar.info("🔄 Fetching new data...")
         time.sleep(0.1)
         st.rerun()
     else:
-        # Show countdown
         remaining = int(refresh_interval - time_since_refresh)
-        st.sidebar.info(f"🔄 Next refresh in {remaining} seconds")
-        
-        # Show next full reload countdown
-        time_until_full_reload = FULL_RELOAD_INTERVAL - (time.time() - st.session_state.last_full_reload)
-        if time_until_full_reload > 0:
-            hours_remaining = time_until_full_reload / 3600
-            st.sidebar.caption(f"♻️ Full reload in {hours_remaining:.1f}h")
-        
-        st.sidebar.caption("💡 Switch timelines instantly - uses cached data!")
-        
-        # Rerun after 1 second to update countdown
+        st.sidebar.text(f"Refresh in: {remaining}s")
         time.sleep(1)
         st.rerun()
 
 else:
-    st.error("No data available. Please check your GCS bucket and ensure data is being written.")
-    st.info(f"Looking for data in: gs://{BUCKET_NAME}/{PREFIX}**/")
-    st.info("Expected structure: gs://crypto-db-east1/year=2025/month=11/day=27/hour=04/*.parquet")
-    
-    # Retry button
+    st.error("No data available. Check GCS bucket.")
     if st.button("Retry"):
         st.rerun()

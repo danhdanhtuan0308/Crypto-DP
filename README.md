@@ -30,9 +30,8 @@ Overview : Data Pipeline from Coinbase Websocket -> Kafka Topic then fan-out to 
    - Deployed on Railway with parallel file loading from GCS
 
 **Railway Deployment**
-   - Pipeline service: 3 workers (Producer, Aggregator, GCS Writer) + health server
+   - Pipeline service: 3 workers (Producer, Aggregator, GCS Writer)
    - Dashboard service: Streamlit web app
-   - Auto-deploys on git push
 
 ### Next Steps
 - Build ML model consumer for dynamic pricing predictions 

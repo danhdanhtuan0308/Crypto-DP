@@ -151,10 +151,7 @@ class MinuteAggregator:
         # Average buy/sell ratio
         buy_sell_ratios = [d.get('buy_sell_ratio', 0) for d in self.window_data if d.get('buy_sell_ratio', 0) > 0]
         avg_buy_sell_ratio_1m = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0.0
-        
-        # ===============================
-        # AGGREGATE MICROSTRUCTURE METRICS
-        # ===============================
+
         
         # 1. Bid-Ask Spread (average over 1 minute)
         spreads = [d.get('bid_ask_spread_1s', 0) for d in self.window_data if d.get('bid_ask_spread_1s', 0) > 0]
