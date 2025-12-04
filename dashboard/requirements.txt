@@ -1,0 +1,7 @@
+streamlit>=1.50.0
+pandas>=2.3.3
+plotly>=5.17.0
+google-cloud-storage>=3.6.0
+google-auth>=2.43.0
+pytz>=2023.3
+python-dateutil>=2.9.0

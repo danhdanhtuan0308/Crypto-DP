@@ -8,12 +8,12 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt from project root (one level up from build context)
+# Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all pipeline files
-COPY data-pipeline/ .
+COPY . .
 
 # Make script executable
 RUN chmod +x start_pipeline_railway.sh
