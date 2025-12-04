@@ -8,14 +8,12 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
-COPY requirements.txt .
+# Copy requirements from root
+COPY ../requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy pipeline scripts
-COPY data-pipeline/ ./data-pipeline/
-COPY start_pipeline_railway.sh .
-COPY health_server.py .
+# Copy all pipeline files
+COPY . .
 
 # Make script executable
 RUN chmod +x start_pipeline_railway.sh
