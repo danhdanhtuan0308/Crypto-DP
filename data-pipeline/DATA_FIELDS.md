@@ -117,56 +117,255 @@ Each Kafka message contains the following fields (using Coinbase data):
 - **Ticker data**: 24-hour statistics from Coinbase WebSocket
 - **Order book depth**: Top 50 bid/ask levels maintained in memory
 
-## Key Features for Dynamic Pricing Model
+---
 
-### Primary Indicators (Multi-Timeframe Analysis)
+## GCS Parquet Files (btc_1min_agg Topic)
 
-#### Immediate (1-Second) - UPDATED WITH MICROSTRUCTURE METRICS
-1. **`ofi_1s`** - 🔥 **LEADING INDICATOR** (predicts price before it moves!)
-2. **`price`** - What you're predicting
-3. **`micro_price_deviation_1s`** - Aggressive buying/selling pressure
-4. **`bid_ask_spread_1s`** - Liquidity cost (lower = better)
-5. **`depth_2pct_1s`** - Available liquidity (higher = better)
-6. **`buy_sell_volume_ratio_1s`** - >1 = more buying RIGHT NOW
-7. **`cvd_1s`** - Cumulative net buying/selling
-8. **`volume_1s`** - Immediate trading activity
-9. **`trade_count_1s`** - High trade count = market is active/volatile
-10. **`liquidity_health_1s`** - Overall market quality
+**What gets stored in GCS**: Only the **1-minute aggregated data** from `btc_1min_agg` topic.
 
-#### Short-Term (1-Minute)
-5. **`price_change_percent_1min`** - Immediate price momentum
-6. **`volume_1min`** - Short-term trading intensity
-7. **`buy_volume_1min` vs `sell_volume_1min`** - Short-term pressure direction
+### Stored Fields (40+ metrics)
 
-#### Medium-Term (1-Hour)
-8. **`price_change_percent_1h`** - Hourly trend strength
-9. **`high_1h` - `low_1h`** - Hourly volatility range
-10. **`volume_1h`** - Sustained activity level
+#### Basic Information
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Trading pair (BTC-USD) |
+| `window_start` | long | Window start timestamp (ms, UTC) |
+| `window_end` | long | Window end timestamp (ms, UTC) |
+| `window_start_est` | string | Human-readable EST time |
+| `last_ingestion_time` | string | Last ingestion timestamp |
+| `num_ticks` | int | Number of 1-second ticks in window |
 
-#### Long-Term (24-Hour)
-11. **`price_change_percent_24h`** - Daily trend
-12. **`volume_24h`** - Overall market interest
-13. **`buy_sell_ratio`** - Buy/Sell volume ratio from trades (>1 = more buying)
+#### OHLC (1-Minute)
+| Field | Type | Description |
+|-------|------|-------------|
+| `open` | float | Opening price |
+| `high` | float | Highest price |
+| `low` | float | Lowest price |
+| `close` | float | Closing price |
+| `price_change_1m` | float | Close - Open |
+| `price_change_percent_1m` | float | % change |
 
-### Multi-Timeframe Strategy for ML
+#### Volume (1-Minute)
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_volume_1m` | float | Total volume traded |
+| `total_buy_volume_1m` | float | Total buy volume |
+| `total_sell_volume_1m` | float | Total sell volume |
+| `trade_count_1m` | int | Number of trades |
+| `avg_buy_sell_ratio_1m` | float | Average buy/sell ratio |
 
-**For Predicting Next 1-Second Price:**
-- **Weight 1s metrics highest** (70%): `buy_sell_volume_ratio_1s`, `volume_1s`
-- **Weight 1min metrics** (20%): `price_change_percent_1min`
-- **Weight 1h/24h** (10%): Trend confirmation
+#### 24-Hour Stats (Pass-through)
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume_24h` | float | 24-hour volume from ticker |
+| `high_24h` | float | 24-hour high |
+| `low_24h` | float | 24-hour low |
 
-**For Predicting Next 1-Minute Price:**
-- **Weight 1min metrics highest** (50%): `volume_1min`, `price_change_1min`
-- **Weight 1s metrics** (30%): Real-time momentum
-- **Weight 1h metrics** (20%): Trend direction
+#### Market Microstructure (1-Minute Aggregated)
+| Field | Type | Description |
+|-------|------|-------------|
+| `volatility_1m` | float | Standard deviation of 1s returns |
+| `order_imbalance_ratio_1m` | float | (Buy - Sell) / (Buy + Sell) |
+| `volatility_regime` | string | "low", "medium", or "high" |
+| `avg_bid_ask_spread_1m` | float | Average spread |
+| `avg_depth_2pct_1m` | float | Average order book depth |
+| `avg_bid_depth_2pct_1m` | float | Average bid depth |
+| `avg_ask_depth_2pct_1m` | float | Average ask depth |
+| `avg_vwap_1m` | float | Average VWAP |
+| `avg_micro_price_deviation_1m` | float | Average price deviation from mid |
+| `cvd_1m` | float | Cumulative volume delta (latest) |
+| `total_ofi_1m` | float | Total order flow imbalance |
+| `avg_ofi_1m` | float | Average order flow imbalance |
+| `avg_kyles_lambda_1m` | float | Average market impact coefficient |
+| `avg_liquidity_health_1m` | float | Average liquidity health |
+| `avg_mid_price_1m` | float | Average mid-price |
+| `latest_best_bid_1m` | float | Best bid at window end |
+| `latest_best_ask_1m` | float | Best ask at window end |
 
-**Signal Strength (Trade-Based):**
-- `buy_sell_volume_ratio_1s > 2.0` + `price_change_percent_1min > 0.5%` → **STRONG BUY**
-- `buy_sell_volume_ratio_1s < 0.5` + `price_change_percent_1min < -0.5%` → **STRONG SELL**
-- `volume_1s > 3x average_volume_1min` → **HIGH VOLATILITY ALERT**
-- `trade_count_1s > 50` → **HIGH TRADING ACTIVITY** (institutional interest)
+### File Organization
+- **Path**: `gs://crypto-db-east1/year=YYYY/month=MM/day=DD/hour=HH/btc_1min_agg+0+XXXXXXXXXX.snappy.parquet`
+- **Frequency**: 1 file per hour (60 rows)
+- **Compression**: Snappy
+- **Timezone**: All timestamps in EST/EDT
 
-## Example Message (Coinbase)
+## Data Pipeline Flow
+
+### 1️⃣ Coinbase WebSocket → Producer (70+ fields, 1 msg/sec)
+
+**Raw Data Received:**
+- **Ticker channel**: `price`, `volume_24h`, `high_24h`, `low_24h`, `open_24h`, `best_bid`, `best_ask`
+- **Matches channel**: `price`, `size`, `side` (buy/sell)
+- **Level2 channel**: Order book snapshot & updates (top 50 bids/asks)
+
+**Producer Calculates (Real-time, 1-second windows):**
+
+#### Price Metrics
+- `price`, `high_1s`, `low_1s`, `price_change_1s`, `price_change_percent_1s`
+- Rolling windows: `high_1min`, `low_1min`, `price_change_1min`, `price_change_percent_1min`
+- Hourly: `high_1h`, `low_1h`, `price_change_1h`, `price_change_percent_1h`
+- Daily: `price_change_24h`, `price_change_percent_24h`
+
+#### Volume Metrics
+- `volume_1s`, `buy_volume_1s`, `sell_volume_1s`, `buy_sell_volume_ratio_1s`, `trade_count_1s`
+- Rolling: `volume_1min`, `buy_volume_1min`, `sell_volume_1min`
+- Hourly: `volume_1h`, `buy_volume_1h`, `sell_volume_1h`
+
+#### Microstructure Metrics (from Order Book + Trades)
+- `bid_ask_spread_1s`, `mid_price_1s`, `best_bid_1s`, `best_ask_1s`
+- `depth_2pct_1s`, `bid_depth_2pct_1s`, `ask_depth_2pct_1s`
+- `vwap_1s`, `micro_price_deviation_1s`
+- `cvd_1s` (cumulative), `ofi_1s`, `kyles_lambda_1s`, `liquidity_health_1s`
+
+**Publishes to**: `BTC-USD` Kafka topic (1 message/second, 70+ fields)
+
+---
+
+### 2️⃣ Aggregator → 1-Minute Windows (37 fields, 1 msg/min)
+
+**Consumes from**: `BTC-USD` topic (60 messages = 1 minute)
+
+**Aggregation Logic:**
+
+#### OHLC (calculated from 60 prices)
+- `open` ← first price
+- `high` ← max price
+- `low` ← min price
+- `close` ← last price
+- `price_change_1m`, `price_change_percent_1m`
+
+#### Volume (sum of 60 seconds)
+- `total_volume_1m` ← sum(`volume_1s`)
+- `total_buy_volume_1m` ← sum(`buy_volume_1s`)
+- `total_sell_volume_1m` ← sum(`sell_volume_1s`)
+- `trade_count_1m` ← sum(`trade_count_1s`)
+- `avg_buy_sell_ratio_1m` ← average
+
+#### Microstructure (averaged over 60 seconds)
+- `avg_bid_ask_spread_1m` ← mean(`bid_ask_spread_1s`)
+- `avg_depth_2pct_1m` ← mean(`depth_2pct_1s`)
+- `avg_bid_depth_2pct_1m`, `avg_ask_depth_2pct_1m`
+- `avg_vwap_1m` ← mean(`vwap_1s`)
+- `avg_micro_price_deviation_1m` ← mean(`micro_price_deviation_1s`)
+- `avg_ofi_1m` ← mean(`ofi_1s`)
+- `total_ofi_1m` ← sum(`ofi_1s`)
+- `avg_kyles_lambda_1m` ← mean(`kyles_lambda_1s`)
+- `avg_liquidity_health_1m` ← mean(`liquidity_health_1s`)
+- `avg_mid_price_1m` ← mean(`mid_price_1s`)
+- `latest_best_bid_1m`, `latest_best_ask_1m` ← last values
+
+#### Calculated Metrics
+- `volatility_1m` ← std dev of price returns
+- `order_imbalance_ratio_1m` ← (Buy - Sell) / (Buy + Sell)
+- `volatility_regime` ← "low" (<0.1%), "medium" (<0.5%), "high" (>0.5%)
+- `cvd_1m` ← latest cumulative value
+
+#### Pass-through (from last tick)
+- `volume_24h`, `high_24h`, `low_24h`
+
+#### Metadata
+- `window_start`, `window_end`, `window_start_est`
+- `num_ticks` (should be 60)
+- `last_ingestion_time`
+
+**Publishes to**: `btc_1min_agg` Kafka topic (1 message/minute, 37 fields)
+
+---
+
+### 3️⃣ GCS Consumer → Parquet Files (37 fields stored)
+
+**Consumes from**: `btc_1min_agg` topic
+
+**Storage Format:**
+- Path: `gs://crypto-db-east1/year=YYYY/month=MM/day=DD/hour=HH/`
+- File: `btc_1min_agg+0+XXXXXXXXXX.snappy.parquet`
+- Frequency: 1 file/hour (60 rows)
+- Compression: Snappy
+
+**All 37 Fields Stored in GCS:**
+1. `symbol`
+2. `window_start`
+3. `window_end`
+4. `window_start_est`
+5. `open`
+6. `high`
+7. `low`
+8. `close`
+9. `price_change_1m`
+10. `price_change_percent_1m`
+11. `total_volume_1m`
+12. `total_buy_volume_1m`
+13. `total_sell_volume_1m`
+14. `trade_count_1m`
+15. `avg_buy_sell_ratio_1m`
+16. `volume_24h`
+17. `high_24h`
+18. `low_24h`
+19. `volatility_1m`
+20. `order_imbalance_ratio_1m`
+21. `volatility_regime`
+22. `avg_bid_ask_spread_1m`
+23. `avg_depth_2pct_1m`
+24. `avg_bid_depth_2pct_1m`
+25. `avg_ask_depth_2pct_1m`
+26. `avg_vwap_1m`
+27. `avg_micro_price_deviation_1m`
+28. `cvd_1m`
+29. `total_ofi_1m`
+30. `avg_ofi_1m`
+31. `avg_kyles_lambda_1m`
+32. `avg_liquidity_health_1m`
+33. `avg_mid_price_1m`
+34. `latest_best_bid_1m`
+35. `latest_best_ask_1m`
+36. `last_ingestion_time`
+37. `num_ticks`
+
+### Example Row (Parquet)
+```json
+{
+  "symbol": "BTC-USD",
+  "window_start": 1733270400000,
+  "window_end": 1733270460000,
+  "window_start_est": "2025-12-03 19:00:00",
+  "open": 97500.00,
+  "high": 97525.00,
+  "low": 97490.00,
+  "close": 97520.00,
+  "price_change_1m": 20.00,
+  "price_change_percent_1m": 0.021,
+  "total_volume_1m": 2.5643,
+  "total_buy_volume_1m": 1.3421,
+  "total_sell_volume_1m": 1.2222,
+  "trade_count_1m": 45,
+  "avg_buy_sell_ratio_1m": 1.098,
+  "volume_24h": 12500.50,
+  "high_24h": 98000.00,
+  "low_24h": 96500.00,
+  "volatility_1m": 0.035,
+  "order_imbalance_ratio_1m": 0.047,
+  "volatility_regime": "low",
+  "avg_bid_ask_spread_1m": 2.50,
+  "avg_depth_2pct_1m": 125.34,
+  "avg_bid_depth_2pct_1m": 65.20,
+  "avg_ask_depth_2pct_1m": 60.14,
+  "avg_vwap_1m": 97512.50,
+  "avg_micro_price_deviation_1m": 0.15,
+  "cvd_1m": 15.67,
+  "total_ofi_1m": 2.34,
+  "avg_ofi_1m": 0.039,
+  "avg_kyles_lambda_1m": 0.00015,
+  "avg_liquidity_health_1m": 45.67,
+  "avg_mid_price_1m": 97510.00,
+  "latest_best_bid_1m": 97518.00,
+  "latest_best_ask_1m": 97522.00,
+  "last_ingestion_time": "2025-12-03T19:00:00-05:00",
+  "num_ticks": 60
+}
+```
+
+---
+
+## Example Message
 
 ```json
 {
