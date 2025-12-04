@@ -8,12 +8,12 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements from root
-COPY ../requirements.txt .
+# Copy requirements.txt from project root (one level up from build context)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all dashboard files
-COPY . .
+COPY dashboard/ .
 
 # Make script executable
 RUN chmod +x start_dashboard.sh
