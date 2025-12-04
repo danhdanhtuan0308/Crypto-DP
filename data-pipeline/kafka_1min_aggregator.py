@@ -304,7 +304,7 @@ def main():
                         )
                         producer.poll(0)
                         logger.info(
-                            f"⏰ Agg #{aggregator.message_count} (timeout) | "
+                            f"Agg #{aggregator.message_count} (timeout) | "
                             f"EST: {agg_msg['window_start_est']} | "
                             f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                             f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "
@@ -335,7 +335,7 @@ def main():
                     )
                     producer.poll(0)
                     logger.info(
-                        f"✅ Agg #{aggregator.message_count} | "
+                        f"Agg #{aggregator.message_count} | "
                         f"EST: {agg_msg['window_start_est']} | "
                         f"OHLC: {agg_msg['open']:.2f}/{agg_msg['high']:.2f}/"
                         f"{agg_msg['low']:.2f}/{agg_msg['close']:.2f} | "

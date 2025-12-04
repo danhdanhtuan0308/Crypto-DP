@@ -67,9 +67,9 @@ class ParquetWriter:
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             self.storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id', 'crypto-dp'))
-            logger.info(f"🔑 Using service account: {creds_dict.get('client_email', 'unknown')}")
+            logger.info(f"Using service account: {creds_dict.get('client_email', 'unknown')}")
         else:
-            logger.warning("⚠️ No GCP credentials found, using default")
+            logger.warning("No GCP credentials found, using default")
             self.storage_client = storage.Client()
         
         self.bucket = self.storage_client.bucket(bucket_name)
@@ -130,7 +130,7 @@ class ParquetWriter:
             )
             
             logger.info(
-                f"✅ Uploaded: gs://{self.bucket_name}/{blob_path} (EST) "
+                f"Uploaded: gs://{self.bucket_name}/{blob_path} (EST) "
                 f"({len(self.buffer)} rows, {blob.size / 1024:.2f} KB)"
             )
             
@@ -140,14 +140,14 @@ class ParquetWriter:
             self.last_flush = time.time()
             
         except Exception as e:
-            logger.error(f"❌ Failed to write Parquet: {e}")
+            logger.error(f"Failed to write Parquet: {e}")
             raise
 
 
 def run_consumer():
     """Run the consumer with health monitoring"""
     logger.info("=" * 70)
-    logger.info("🚀 GCS Parquet Writer Started")
+    logger.info("GCS Parquet Writer Started")
     logger.info("=" * 70)
     logger.info(f"Source topic: {SOURCE_TOPIC}")
     logger.info(f"Target bucket: gs://{GCS_BUCKET}")
@@ -171,12 +171,12 @@ def run_consumer():
                 time_since_message = current_time - last_message_time
                 if time_since_message > STALE_DATA_THRESHOLD:
                     logger.warning(
-                        f"⚠️ No messages for {time_since_message:.0f}s "
+                        f"No messages for {time_since_message:.0f}s "
                         f"(threshold: {STALE_DATA_THRESHOLD}s)"
                     )
                 else:
                     logger.info(
-                        f"🏥 Health OK | Files written: {writer.file_count} | "
+                        f"Health OK | Files written: {writer.file_count} | "
                         f"Last message: {time_since_message:.0f}s ago"
                     )
                 last_health_check = current_time
@@ -184,7 +184,7 @@ def run_consumer():
             if msg is None:
                 # Check if we should flush due to timeout
                 if writer.buffer and (current_time - writer.last_flush) >= writer.flush_interval:
-                    logger.info("⏰ Flush interval reached, writing file...")
+                    logger.info("Flush interval reached, writing file...")
                     writer.flush()
                 continue
             
@@ -222,16 +222,16 @@ def main():
     while True:
         try:
             retry_count += 1
-            logger.info(f"🚀 Starting GCS consumer (attempt #{retry_count})")
+            logger.info(f"Starting GCS consumer (attempt #{retry_count})")
             run_consumer()
         except Exception as e:
-            logger.error(f"❌ Error: {e}. Restarting in 10s...")
+            logger.error(f"Error: {e}. Restarting in 10s...")
             time.sleep(10)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             break
         
-        logger.info("🔄 Restarting consumer...")
+        logger.info("Restarting consumer...")
 
 
 if __name__ == "__main__":

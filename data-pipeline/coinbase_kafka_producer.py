@@ -210,7 +210,7 @@ async def receive_websocket_data(websocket, state):
                     'bids': [(float(p), float(v)) for p, v in message.get('bids', [])[:50]],  # Top 50
                     'asks': [(float(p), float(v)) for p, v in message.get('asks', [])[:50]]
                 }
-                logger.info(f"📚 Order book snapshot received: {len(state['order_book']['bids'])} bids, {len(state['order_book']['asks'])} asks")
+                logger.info(f"Order book snapshot received: {len(state['order_book']['bids'])} bids, {len(state['order_book']['asks'])} asks")
             
             # Handle Level 2 updates (incremental order book changes)
             elif msg_type == 'l2update':
@@ -498,9 +498,9 @@ async def send_to_kafka_periodically(producer, state):
             
             if state['message_count'] % 10 == 0:
                 # Indicate data source
-                source = "📚 L2" if state['order_book']['bids'] else "📊 Ticker"
+                source = "[L2]" if state['order_book']['bids'] else "[Ticker]"
                 logger.info(
-                    f"📤 Sent {state['message_count']} | {source} | "
+                    f"Sent {state['message_count']} | {source} | "
                     f"Price: ${kafka_message['price']:.2f} | "
                     f"Spread: ${kafka_message['bid_ask_spread_1s']:.2f} | "
                     f"Vol: {kafka_message['volume_1s']:.4f} | "
@@ -516,7 +516,7 @@ async def send_to_kafka_periodically(producer, state):
 
 async def health_check(state, websocket):
     """Monitor data freshness and trigger reconnect if stale"""
-    logger.info("🏥 Health check started")
+    logger.info("Health check started")
     consecutive_stale = 0
     
     while not state.get('should_reconnect', False):
@@ -530,24 +530,24 @@ async def health_check(state, websocket):
         if time_since_trade > STALE_DATA_THRESHOLD:
             consecutive_stale += 1
             logger.warning(
-                f"⚠️ STALE DATA: No trades for {time_since_trade:.0f}s "
+                f"STALE DATA: No trades for {time_since_trade:.0f}s "
                 f"(threshold: {STALE_DATA_THRESHOLD}s) - count: {consecutive_stale}"
             )
             
             # After 3 consecutive stale checks, trigger reconnect
             if consecutive_stale >= 3:
-                logger.error("❌ Data stale for too long - triggering reconnect!")
+                logger.error("Data stale for too long - triggering reconnect!")
                 state['should_reconnect'] = True
                 await websocket.close()
                 break
         else:
             if consecutive_stale > 0:
-                logger.info(f"✅ Data flowing again - last trade {time_since_trade:.1f}s ago")
+                logger.info(f"Data flowing again - last trade {time_since_trade:.1f}s ago")
             consecutive_stale = 0
             
             # Log health status periodically
             logger.info(
-                f"🏥 Health OK | Price: ${state.get('latest_price', 0):.2f} | "
+                f"Health OK | Price: ${state.get('latest_price', 0):.2f} | "
                 f"Messages: {state.get('message_count', 0)} | "
                 f"Last trade: {time_since_trade:.1f}s ago"
             )
@@ -609,7 +609,7 @@ async def stream_coinbase_to_kafka():
                 ]
             }
             await websocket.send(json.dumps(subscribe_message))
-            logger.info(f"📡 Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches, level2_batch")
+            logger.info(f"Subscribed to Coinbase {PRODUCT_ID} channels: ticker, matches, level2_batch")
             
             # Run all tasks concurrently (receive, send, health check)
             await asyncio.gather(
@@ -644,19 +644,19 @@ def main():
     while True:  # Infinite retry - always try to reconnect
         try:
             retry_count += 1
-            logger.info(f"🚀 Starting Coinbase producer (attempt #{retry_count})")
+            logger.info(f"Starting Coinbase producer (attempt #{retry_count})")
             asyncio.run(stream_coinbase_to_kafka())
         except websockets.exceptions.ConnectionClosed as e:
-            logger.warning(f"⚠️ Connection closed: {e}. Reconnecting in 5s...")
+            logger.warning(f"Connection closed: {e}. Reconnecting in 5s...")
             time.sleep(5)
         except Exception as e:
-            logger.error(f"❌ Error: {e}. Reconnecting in 10s...")
+            logger.error(f"Error: {e}. Reconnecting in 10s...")
             time.sleep(10)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             break
         
-        logger.info("🔄 Reconnecting...")
+        logger.info("Reconnecting...")
 
 
 if __name__ == "__main__":

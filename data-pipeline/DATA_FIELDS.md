@@ -88,7 +88,7 @@ Each Kafka message contains the following fields (using Coinbase data):
 | **`vwap_1s`** | float | **Volume-weighted average trade price** | **Feature: Execution quality** |
 | **`micro_price_deviation_1s`** | float | **Avg(Trade Price - Mid-Price)** | **Key Feature: Aggressive order flow** |
 | **`cvd_1s`** | float | **Cumulative (Buy Vol - Sell Vol)** | **Key Feature: Net accumulation/distribution** |
-| **`ofi_1s`** | float | **Order Flow Imbalance: ΔBid Vol - ΔAsk Vol** | **🔥 Leading Indicator: Predicts price movement** |
+| **`ofi_1s`** | float | **Order Flow Imbalance: ΔBid Vol - ΔAsk Vol** | **Leading Indicator: Predicts price movement** |
 | **`kyles_lambda_1s`** | float | **Market impact: ΔPrice / Signed Volume** | **Feature: Liquidity depth measure** |
 | **`liquidity_health_1s`** | float | **Depth / (Spread × Volatility)** | **Feature: Composite market quality** |
 
@@ -190,7 +190,7 @@ Each Kafka message contains the following fields (using Coinbase data):
 
 ## Data Pipeline Flow
 
-### 1️⃣ Coinbase WebSocket → Producer (70+ fields, 1 msg/sec)
+### Step 1: Coinbase WebSocket → Producer (70+ fields, 1 msg/sec)
 
 **Raw Data Received:**
 - **Ticker channel**: `price`, `volume_24h`, `high_24h`, `low_24h`, `open_24h`, `best_bid`, `best_ask`
@@ -220,7 +220,7 @@ Each Kafka message contains the following fields (using Coinbase data):
 
 ---
 
-### 2️⃣ Aggregator → 1-Minute Windows (37 fields, 1 msg/min)
+### Step 2: Aggregator → 1-Minute Windows (37 fields, 1 msg/min)
 
 **Consumes from**: `BTC-USD` topic (60 messages = 1 minute)
 
@@ -271,7 +271,7 @@ Each Kafka message contains the following fields (using Coinbase data):
 
 ---
 
-### 3️⃣ GCS Consumer → Parquet Files (37 fields stored)
+### Step 3: GCS Consumer → Parquet Files (37 fields stored)
 
 **Consumes from**: `btc_1min_agg` topic
 
