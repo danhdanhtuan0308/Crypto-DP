@@ -79,14 +79,14 @@ class ParquetWriter:
         # 1 file per minute (1 row each)
         self.buffer_size = 1
         self.flush_interval = 60  # 1 minute
-        logger.info("📝 Writing new file every 1 minute")
+        logger.info("Writing new file every 1 minute")
         
         self.last_flush = time.time()
     
     def add_record(self, record):
         """Add a record to the buffer"""
         self.buffer.append(record)
-        logger.info(f"📥 Received 1min agg record, buffer size: {len(self.buffer)}")
+        logger.info(f"Received 1min agg record, buffer size: {len(self.buffer)}")
         
         # Flush immediately when we have 1 record (1-minute data)
         self.flush()
