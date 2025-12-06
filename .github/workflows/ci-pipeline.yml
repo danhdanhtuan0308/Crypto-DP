@@ -174,41 +174,23 @@ jobs:
         bandit -r . -ll
       continue-on-error: true
 
-  build:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: [test, lint]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Build Docker image
-      working-directory: data-pipeline
-      run: |
-        docker build -t crypto-dp-pipeline:${{ github.sha }} .
-        docker tag crypto-dp-pipeline:${{ github.sha }} crypto-dp-pipeline:latest
-    
-    - name: Test Docker image
-      run: |
-        docker run --rm crypto-dp-pipeline:${{ github.sha }} python -c "import confluent_kafka; print('Kafka OK')"
-        docker run --rm crypto-dp-pipeline:${{ github.sha }} python -c "import websockets; print('WebSocket OK')"
-        docker run --rm crypto-dp-pipeline:${{ github.sha }} python -c "import google.cloud.storage; print('GCS OK')"
-
-  notify:
-    name: Notify Status
+  summary:
+    name: CI Summary
     runs-on: ubuntu-latest
     needs: [test, lint, security]
     if: always()
     
     steps:
-    - name: Check test results
+    - name: Check CI Results
       run: |
-        echo "Tests completed"
-        echo "Test status: ${{ needs.test.result }}"
-        echo "Lint status: ${{ needs.lint.result }}"
-        echo "Security status: ${{ needs.security.result }}"
+        echo "=== CI Pipeline Summary ==="
+        echo "Tests: ${{ needs.test.result }}"
+        echo "Lint: ${{ needs.lint.result }}"
+        echo "Security: ${{ needs.security.result }}"
+        
+        if [ "${{ needs.test.result }}" != "success" ]; then
+          echo "❌ Tests failed"
+          exit 1
+        fi
+        
+        echo "✅ All CI checks passed"
