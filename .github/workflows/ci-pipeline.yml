@@ -12,6 +12,12 @@ on:
       - 'data-pipeline/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  statuses: write
+
 env:
   PYTHON_VERSION: '3.12'
 
