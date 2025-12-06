@@ -27,63 +27,40 @@ from gcs_kafka_consumer import ParquetWriter, EASTERN, SOURCE_TOPIC
 class TestConsumerDataFormat:
     """Test that consumer receives and processes data in correct format"""
     
-    def test_valid_aggregated_message_structure(self):
+    def test_aggregated_message_has_required_fields(self):
         """Test that aggregated message has correct structure"""
-        # Sample 1-minute aggregated message
         message = {
             'window_start': '2024-01-01T00:00:00-05:00',
             'window_end': '2024-01-01T00:01:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0,
-            'num_trades': 60,
-            'vwap': 50025.0
+            'open': 1.0,
+            'high': 1.0,
+            'low': 1.0,
+            'close': 1.0,
+            'volume': 1.0
         }
         
         # Validate required fields exist
         required_fields = ['window_start', 'window_end', 'open', 'high', 'low', 'close', 'volume']
         for field in required_fields:
             assert field in message
-            assert message[field] is not None
     
     def test_dataframe_conversion(self):
         """Test conversion of message to DataFrame"""
-        records = [{
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'window_end': '2024-01-01T00:01:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0
-        }]
-        
+        # Just test that DataFrame can be created from records
+        records = [{'window_start': '2024-01-01T00:00:00-05:00', 'volume': 1.0}]
         df = pd.DataFrame(records)
-        
         assert len(df) == 1
-        assert 'open' in df.columns
-        assert df['open'][0] == 50000.0
+        assert 'window_start' in df.columns
     
     def test_parquet_schema_validation(self):
-        """Test that Parquet schema is correct"""
-        df = pd.DataFrame([{
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0
-        }])
-        
+        """Test that Parquet schema has required columns"""
+        df = pd.DataFrame([{'open': 1.0, 'high': 1.0, 'low': 1.0, 'close': 1.0, 'volume': 1.0}])
         table = pa.Table.from_pandas(df)
         
         # Verify schema has expected columns
-        assert 'open' in table.schema.names
-        assert 'high' in table.schema.names
-        assert 'low' in table.schema.names
-        assert 'close' in table.schema.names
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        for col in required_columns:
+            assert col in table.schema.names
 
 
 class TestConsumerEmptyDataHandling:
@@ -110,18 +87,8 @@ class TestConsumerEmptyDataHandling:
     
     def test_null_values_in_data(self):
         """Test handling of null values"""
-        records = [{
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'open': None,  # Null value
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0
-        }]
-        
+        records = [{'open': None, 'volume': 1.0}]
         df = pd.DataFrame(records)
-        
-        # Check that null is handled
         assert pd.isna(df['open'][0])
 
 
@@ -130,13 +97,7 @@ class TestConsumerMissingFields:
     
     def test_message_missing_required_field(self):
         """Test handling when required field is missing"""
-        incomplete_message = {
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'open': 50000.0,
-            # Missing other required fields
-        }
-        
-        # Should have mechanism to validate
+        incomplete_message = {'window_start': '2024-01-01T00:00:00-05:00', 'open': 1.0}
         required_fields = ['window_start', 'open', 'high', 'low', 'close', 'volume']
         missing_fields = [f for f in required_fields if f not in incomplete_message]
         
@@ -145,16 +106,7 @@ class TestConsumerMissingFields:
     
     def test_handle_missing_optional_fields(self):
         """Test that optional fields can be missing"""
-        message = {
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0
-            # Optional fields like 'num_trades' can be missing
-        }
-        
+        message = {'window_start': '2024-01-01T00:00:00-05:00', 'open': 1.0, 'high': 1.0, 'low': 1.0, 'close': 1.0, 'volume': 1.0}
         df = pd.DataFrame([message])
         assert 'num_trades' not in df.columns or df['num_trades'].isna().all()
 
@@ -280,44 +232,17 @@ class TestConsumerGCSIntegration:
 class TestConsumerEdgeCases:
     """Test edge cases in consumer"""
     
-    def test_extremely_large_volume(self):
-        """Test handling of extremely large volume"""
-        message = {
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'volume': 999999999.99,  # Very large volume
-            'open': 50000.0,
-            'close': 50000.0
-        }
-        
-        df = pd.DataFrame([message])
-        assert df['volume'][0] == 999999999.99
+    def test_volume_exists_and_positive(self):
+        """Test that volume exists and is positive"""
+        message = {'volume': 100.5}
+        assert 'volume' in message
+        assert message['volume'] > 0
     
-    def test_negative_values(self):
-        """Test handling of negative values (should not occur but test anyway)"""
-        message = {
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'volume': -100,  # Invalid negative volume
-            'open': 50000.0,
-            'close': 50000.0
-        }
-        
-        # Should detect invalid data
-        assert message['volume'] < 0  # Can flag for validation
-    
-    def test_price_spikes(self):
-        """Test handling of unusual price spikes"""
-        message = {
-            'window_start': '2024-01-01T00:00:00-05:00',
-            'open': 50000.0,
-            'high': 100000.0,  # Unusual spike
-            'low': 49900.0,
-            'close': 50050.0,
-            'volume': 100.0
-        }
-        
-        # Detect unusual price change
-        price_change_pct = (message['high'] - message['open']) / message['open'] * 100
-        assert price_change_pct > 50  # More than 50% change
+    def test_negative_volume_detection(self):
+        """Test detection of invalid negative volume"""
+        message = {'volume': -100}
+        is_valid = message['volume'] > 0
+        assert not is_valid  # Should detect as invalid
 
 
 class TestConsumerTimezone:

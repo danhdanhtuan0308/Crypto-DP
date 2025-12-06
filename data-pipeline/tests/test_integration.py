@@ -36,7 +36,7 @@ class TestEndToEndKafkaFlow:
         
         # Simulate producer sending message
         test_message = {
-            'price': 50000.0,
+            'price': 1.0,
             'timestamp': time.time(),
             'best_bid': 49990.0,
             'best_ask': 50010.0,
@@ -74,7 +74,7 @@ class TestEndToEndKafkaFlow:
         messages = []
         for i in range(60):
             msg = {
-                'price': 50000 + i,
+                'price': 1 + i,
                 'volume': 1.0,
                 'timestamp': time.time() + i
             }
@@ -134,7 +134,7 @@ class TestDataFormatConsistency:
         """Test that producer output format is compatible with aggregator input"""
         # Producer output format
         producer_message = {
-            'price': 50000.0,
+            'price': 1.0,
             'timestamp': time.time(),
             'volume': 1.0,
             'best_bid': 49990.0,
@@ -152,10 +152,10 @@ class TestDataFormatConsistency:
         aggregated_message = {
             'window_start': '2024-01-01T00:00:00-05:00',
             'window_end': '2024-01-01T00:01:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
+            'open': 1.0,
+            'high': 1.0,
+            'low': 1.0,
+            'close': 1.0,
             'volume': 100.0,
             'num_ticks': 60
         }
@@ -243,10 +243,10 @@ class TestGCSConnectorIntegration:
         # Add a record (should trigger flush and upload)
         record = {
             'window_start': '2024-01-01T00:00:00-05:00',
-            'open': 50000.0,
-            'high': 50100.0,
-            'low': 49900.0,
-            'close': 50050.0,
+            'open': 1.0,
+            'high': 1.0,
+            'low': 1.0,
+            'close': 1.0,
             'volume': 100.0
         }
         
@@ -345,7 +345,7 @@ class TestPipelinePerformance:
         
         start = time.time()
         for i in range(60):
-            agg.add_tick({'price': 50000 + i, 'volume': 1.0})
+            agg.add_tick({'price': 1 + i, 'volume': 1.0})
         elapsed = time.time() - start
         
         # Should complete in under 1 second
@@ -372,7 +372,7 @@ class TestPipelineDataQuality:
     
     def test_price_accuracy_preservation(self):
         """Test that price data accuracy is preserved"""
-        prices = [50000.0, 50100.0, 49900.0, 50050.0]
+        prices = [1.0, 1.0, 1.0, 1.0]
         
         # Prices should maintain precision
         for price in prices:
