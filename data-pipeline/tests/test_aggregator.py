@@ -114,6 +114,7 @@ class TestAggregatorWindowBoundaries:
     
     def test_new_minute_triggers_flush(self):
         """Test that new minute triggers flush"""
+        from datetime import timedelta
         agg = MinuteAggregator()
         
         # Set window start to a specific minute
@@ -123,9 +124,9 @@ class TestAggregatorWindowBoundaries:
         # Add some data
         agg.window_data.append({'price': 1, 'volume': 1.0})
         
-        # Simulate tick from next minute
+        # Simulate tick from next minute (use timedelta to handle hour rollover)
         with patch.object(agg, '_get_est_minute') as mock_minute:
-            next_minute = now_est.replace(minute=now_est.minute + 1)
+            next_minute = now_est + timedelta(minutes=1)
             mock_minute.return_value = next_minute
             
             result = agg.add_tick({'price': 1, 'volume': 1.0})
