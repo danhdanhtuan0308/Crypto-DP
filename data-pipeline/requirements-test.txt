@@ -1,0 +1,20 @@
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+pytest-cov>=4.1.0
+pytest-timeout>=2.1.0
+mockafka-py>=0.0.5
+faker>=19.0.0
+
+# Main dependencies (for testing)
+confluent-kafka>=2.12.2
+websockets>=15.0.1
+google-cloud-storage>=3.6.0
+google-auth>=2.43.0
+pyarrow>=22.0.0
+python-dotenv>=1.0.0
+pytz>=2023.3
+numpy>=2.3.5
+pandas>=2.3.3
+python-dateutil>=2.9.0
