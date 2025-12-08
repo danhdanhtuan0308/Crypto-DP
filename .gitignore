@@ -2,3 +2,4 @@
 data-pipeline/.env
 .venv
 .pytest_cache/
+data-pipeline-batch/.env.example
