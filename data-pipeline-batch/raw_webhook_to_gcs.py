@@ -293,7 +293,16 @@ def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
         return False
     
     try:
-        client = storage.Client()
+        # Initialize GCS client with credentials from environment
+        creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+        if creds_json:
+            from google.oauth2 import service_account
+            creds_dict = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
+        else:
+            client = storage.Client()
+        
         bucket = client.bucket(bucket_name)
         
         # Use first row's timestamp for file path
