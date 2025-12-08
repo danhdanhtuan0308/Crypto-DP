@@ -19,6 +19,10 @@ COPY raw_webhook_to_gcs.py /opt/airflow/
 # Copy DAGs
 COPY dags /opt/airflow/dags
 
+# Copy startup script
+COPY start-airflow.sh /opt/airflow/
+RUN chmod +x /opt/airflow/start-airflow.sh
+
 WORKDIR /opt/airflow
 
 ENV PYTHONUNBUFFERED=1
@@ -34,18 +38,5 @@ ENV AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
 # Expose port 8080 for Airflow webserver
 EXPOSE 8080
 
-# Initialize Airflow DB and create user, then start services
-CMD ["bash", "-c", "set -e && \
-     echo 'Initializing Airflow database...' && \
-     airflow db migrate && \
-     echo 'Creating admin user...' && \
-     if [ -n \"${AIRFLOW_USERNAME}\" ] && [ -n \"${AIRFLOW_PASSWORD}\" ]; then \
-       airflow users create --username ${AIRFLOW_USERNAME} --password ${AIRFLOW_PASSWORD} --firstname Crypto --lastname Admin --role Admin --email admin@cryptodp.com 2>/dev/null || echo 'User already exists'; \
-     else \
-       echo 'WARNING: AIRFLOW_USERNAME or AIRFLOW_PASSWORD not set. Creating default admin/admin user'; \
-       airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com 2>/dev/null || echo 'User already exists'; \
-     fi && \
-     echo 'Starting Airflow scheduler...' && \
-     airflow scheduler & \
-     echo 'Starting Airflow webserver on port 8080...' && \
-     exec airflow webserver --port 8080 --host 0.0.0.0"]
+# Use startup script
+CMD ["/opt/airflow/start-airflow.sh"]
