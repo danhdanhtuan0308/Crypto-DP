@@ -29,9 +29,7 @@ ENV AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
 ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
 ENV AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
 
-# Default credentials (override via environment variables)
-ENV AIRFLOW_USERNAME=cryptodp
-ENV AIRFLOW_PASSWORD=CryptoDP2025
+# Credentials MUST be set via environment variables in Railway (no defaults)
 
 # Expose port 8080 for Airflow webserver
 EXPOSE 8080
