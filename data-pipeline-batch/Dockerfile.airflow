@@ -13,6 +13,9 @@ USER airflow
 COPY requirements.txt /tmp/
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+# Copy the ETL code (needed by DAG)
+COPY raw_webhook_to_gcs.py /opt/airflow/
+
 # Copy DAGs
 COPY dags /opt/airflow/dags
 
@@ -20,8 +23,10 @@ WORKDIR /opt/airflow
 
 ENV PYTHONUNBUFFERED=1
 ENV AIRFLOW_HOME=/opt/airflow
-ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor
+ENV AIRFLOW__CORE__EXECUTOR=SequentialExecutor
 ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
+ENV AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
 
 # Initialize Airflow DB and start services
-CMD ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true && airflow webserver & airflow scheduler"]
+CMD ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true && airflow webserver -p 8080 & airflow scheduler"]
