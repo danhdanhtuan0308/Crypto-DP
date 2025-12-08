@@ -19,9 +19,8 @@ COPY raw_webhook_to_gcs.py /opt/airflow/
 # Copy DAGs
 COPY dags /opt/airflow/dags
 
-# Copy startup script
-COPY start-airflow.sh /opt/airflow/
-RUN chmod +x /opt/airflow/start-airflow.sh
+# Copy startup script and make it executable
+COPY --chown=airflow:root --chmod=755 start-airflow.sh /opt/airflow/
 
 WORKDIR /opt/airflow
 
