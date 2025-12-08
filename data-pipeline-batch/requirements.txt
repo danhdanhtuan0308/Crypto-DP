@@ -1,0 +1,10 @@
+google-cloud-storage>=3.6.0
+google-auth>=2.43.0
+pyarrow>=22.0.0
+python-dotenv>=1.0.0
+pytz>=2023.3
+numpy>=2.3.5
+pandas>=2.3.3
+python-dateutil>=2.9.0
+apache-airflow>=2.8.1
+websockets>=15.0.1

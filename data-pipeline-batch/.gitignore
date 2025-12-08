@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Airflow
+airflow-logs/
+airflow-plugins/
+airflow-working-dir/
+logs/
+
+# Docker
+.env
+*.log
+
+# GCS
+credentials.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

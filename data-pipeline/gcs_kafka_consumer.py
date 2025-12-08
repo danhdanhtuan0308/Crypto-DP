@@ -44,6 +44,7 @@ KAFKA_CONFIG = {
 SOURCE_TOPIC = 'btc_1min_agg'
 GCS_BUCKET = os.getenv('GCS_BUCKET', 'crypto-db-east1')
 GCS_CREDENTIALS_PATH = os.getenv('GCS_CREDENTIALS_PATH')
+GCS_OUTPUT_PREFIX = os.getenv('GCS_OUTPUT_PREFIX', 'RealTime')  # Speed Layer -> RealTime/
 
 # Health check settings
 STALE_DATA_THRESHOLD = 90  # seconds without data = stale (should get 1 msg/min)
@@ -107,9 +108,9 @@ class ParquetWriter:
             day = timestamp.strftime('%d')
             hour = timestamp.strftime('%H')
             
-            # Path format: year=2025/month=11/day=25/hour=19/btc_1min_agg+0+0000000001.parquet (EST)
+            # Path format: RealTime/year=2025/month=11/day=25/hour=19/btc_1min_agg+0+0000000001.parquet (EST)
             file_name = f"btc_1min_agg+0+{self.file_count:010d}.snappy.parquet"
-            blob_path = f"year={year}/month={month}/day={day}/hour={hour}/{file_name}"
+            blob_path = f"{GCS_OUTPUT_PREFIX}/year={year}/month={month}/day={day}/hour={hour}/{file_name}"
             
             # Convert to Parquet in memory
             table = pa.Table.from_pandas(df)
