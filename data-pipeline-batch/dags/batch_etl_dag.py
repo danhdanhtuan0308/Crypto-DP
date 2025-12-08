@@ -1,17 +1,23 @@
 """
-Airflow DAG: Batch Layer - Write 60 rows (1-min data) to GCS every hour
+Airflow DAG: Batch Layer ETL - Run entire collection process every hour
 
 Triggered: Every hour at minute 0 (0 * * * *)
-Action: Signals the batch collector to flush its hourly buffer to GCS
+Process: 
+1. Collect 60 minutes of Coinbase data (1-min aggregation)
+2. Write 60 rows to GCS as Parquet
+
+This DAG RUNS the ETL, not just triggers it.
 """
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 from datetime import datetime, timedelta
-import requests
 import os
+import sys
 
+# Add parent directory to import the ETL code
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 default_args = {
     'owner': 'crypto-dp',
@@ -20,35 +26,165 @@ default_args = {
     'email_on_retry': False,
     'retries': 3,
     'retry_delay': timedelta(minutes=2),
-    'execution_timeout': timedelta(minutes=10),
+    'execution_timeout': timedelta(minutes=70),  # 60 min collection + 10 min buffer
 }
 
 
-def trigger_batch_write(**context):
+def collect_and_aggregate_data(**context):
     """
-    Trigger the batch collector to write buffered data to GCS
-    The collector service exposes an HTTP endpoint for this
+    Collect 60 minutes of Coinbase data and aggregate into 1-min rows
+    This runs the ENTIRE ETL process for the past hour
     """
+    import json
+    import asyncio
+    import websockets
+    import pytz
+    import logging
+    from datetime import datetime, timedelta
+    import time
+    
+    logger = logging.getLogger(__name__)
+    EASTERN = pytz.timezone('America/New_York')
+    
+    # Import the MinuteAggregator from raw_webhook_to_gcs
+    from raw_webhook_to_gcs import MinuteAggregator, COINBASE_WS_URL, PRODUCT_ID
+    
+    async def collect_for_duration(duration_minutes=60):
+        """
+        Collect data for 60 minutes and aggregate into 1-min rows
+        Uses MinuteAggregator - same ETL logic as kafka_1min_aggregator.py
+        """
+        aggregator = MinuteAggregator()
+        start_time = time.time()
+        end_time = start_time + (duration_minutes * 60)
+        tick_count = 0
+        minute_count = 0
+        
+        logger.info(f"🚀 Starting data collection for {duration_minutes} minutes...")
+        
+        async with websockets.connect(COINBASE_WS_URL, ping_interval=20, ping_timeout=20) as ws:
+            # Subscribe to ticker
+            subscribe_msg = {
+                "type": "subscribe",
+                "product_ids": [PRODUCT_ID],
+                "channels": ["ticker"]
+            }
+            await ws.send(json.dumps(subscribe_msg))
+            logger.info(f"✅ Connected to Coinbase WebSocket")
+            
+            while time.time() < end_time:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=30)
+                    data = json.loads(msg)
+                    
+                    if data.get('type') != 'ticker':
+                        continue
+                    
+                    # Parse tick (same format as data-pipeline)
+                    tick = {
+                        'price': float(data.get('price', 0)),
+                        'volume_1s': float(data.get('last_size', 0)),
+                        'buy_volume_1s': 0,
+                        'sell_volume_1s': 0,
+                        'trade_count_1s': 1,
+                        'volume_24h': float(data.get('volume_24h', 0)),
+                        'high_24h': float(data.get('high_24h', 0)),
+                        'low_24h': float(data.get('low_24h', 0)),
+                        'symbol': PRODUCT_ID,
+                        'ingestion_time': datetime.now(EASTERN).isoformat(),
+                        'bid_ask_spread_1s': 0,
+                        'depth_2pct_1s': 0,
+                        'bid_depth_2pct_1s': 0,
+                        'ask_depth_2pct_1s': 0,
+                        'vwap_1s': 0,
+                        'micro_price_deviation_1s': 0,
+                        'cvd_1s': 0,
+                        'ofi_1s': 0,
+                        'kyles_lambda_1s': 0,
+                        'liquidity_health_1s': 0,
+                        'mid_price_1s': 0,
+                        'best_bid_1s': 0,
+                        'best_ask_1s': 0,
+                        'buy_sell_ratio': 0,
+                    }
+                    
+                    tick_count += 1
+                    
+                    # ETL: Add tick to aggregator (triggers 1-min aggregation when minute completes)
+                    hourly_result = aggregator.add_tick(tick)
+                    
+                    # Check if hour completed (returns 60 rows)
+                    if hourly_result:
+                        logger.info(f"⚠️ Hour completed early! Got {len(hourly_result)} rows")
+                        return hourly_result
+                    
+                    # Log progress every 100 ticks
+                    if tick_count % 100 == 0:
+                        current_minute_buffer = len(aggregator.window_data)
+                        hourly_buffer = len(aggregator.hourly_buffer)
+                        logger.info(
+                            f"📊 Progress: {tick_count} ticks | "
+                            f"Current minute: {current_minute_buffer} ticks | "
+                            f"Completed minutes: {hourly_buffer}/60"
+                        )
+                    
+                except asyncio.TimeoutError:
+                    await ws.ping()
+                    
+                    # Check if minute should flush due to timeout
+                    current_minute_est = aggregator._get_est_minute()
+                    if aggregator.window_start and current_minute_est > aggregator.window_start:
+                        minute_agg = aggregator._aggregate_minute()
+                        if minute_agg:
+                            aggregator.hourly_buffer.append(minute_agg)
+                            aggregator.window_start = current_minute_est
+                            aggregator.window_data = []
+                            minute_count += 1
+                            logger.info(f"⏱️ Timeout flush: minute {minute_count}/60")
+        
+        # Collection ended - return whatever we have
+        final_row_count = len(aggregator.hourly_buffer)
+        logger.info(f"✅ Collection complete: {tick_count} ticks → {final_row_count} minute-rows")
+        
+        if final_row_count == 0:
+            logger.error("❌ No data aggregated!")
+            raise Exception("No data collected")
+        
+        return aggregator.hourly_buffer
+    
+    # Run the collection
+    hourly_data = asyncio.run(collect_for_duration(60))
+    
+    # Store in XCom for next task
+    context['task_instance'].xcom_push(key='hourly_data', value=hourly_data)
+    
+    return len(hourly_data)
+
+
+def write_to_gcs(**context):
+    """Write the aggregated data to GCS as Parquet"""
     import logging
     logger = logging.getLogger(__name__)
     
-    # Get the batch collector service URL from environment
-    collector_url = os.getenv('BATCH_COLLECTOR_URL', 'http://localhost:5000')
+    # Get data from previous task
+    ti = context['task_instance']
+    hourly_data = ti.xcom_pull(task_ids='collect_and_aggregate', key='hourly_data')
     
-    try:
-        # Send trigger to batch collector
-        response = requests.post(f"{collector_url}/flush", timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            logger.info(f"✅ Batch write successful: {result}")
-            return result
-        else:
-            raise Exception(f"Batch write failed: {response.status_code} - {response.text}")
+    if not hourly_data or len(hourly_data) == 0:
+        raise Exception("No data collected!")
     
-    except Exception as e:
-        logger.error(f"❌ Failed to trigger batch write: {e}")
-        raise
+    logger.info(f"Writing {len(hourly_data)} rows to GCS...")
+    
+    # Import write function
+    from raw_webhook_to_gcs import write_parquet_to_gcs, GCS_BUCKET
+    
+    success = write_parquet_to_gcs(hourly_data, GCS_BUCKET)
+    
+    if not success:
+        raise Exception("Failed to write to GCS!")
+    
+    logger.info(f"✅ Successfully wrote {len(hourly_data)} rows to GCS")
+    return len(hourly_data)
 
 
 def validate_gcs_data(**context):
@@ -98,28 +234,34 @@ def validate_gcs_data(**context):
     return True
 
 
-# Production DAG - runs every hour
+# Production DAG - runs entire ETL every hour
 with DAG(
     'batch_etl_1hour_prod',
     default_args=default_args,
-    description='Batch Layer: Write 60 rows to GCS every hour',
+    description='Batch ETL: Collect 60 min data, aggregate, write to GCS',
     schedule_interval='0 * * * *',  # Every hour at minute 0
     start_date=days_ago(1),
     catchup=False,
     tags=['batch', 'etl', 'production', '1hour'],
 ) as dag:
     
-    trigger_write = PythonOperator(
-        task_id='trigger_batch_write',
-        python_callable=trigger_batch_write,
+    collect_task = PythonOperator(
+        task_id='collect_and_aggregate',
+        python_callable=collect_and_aggregate_data,
         provide_context=True,
     )
     
-    validate_data = PythonOperator(
+    write_task = PythonOperator(
+        task_id='write_to_gcs',
+        python_callable=write_to_gcs,
+        provide_context=True,
+    )
+    
+    validate_task = PythonOperator(
         task_id='validate_gcs_data',
         python_callable=validate_gcs_data,
         provide_context=True,
     )
     
     # Task dependencies
-    trigger_write >> validate_data
+    collect_task >> write_task >> validate_task

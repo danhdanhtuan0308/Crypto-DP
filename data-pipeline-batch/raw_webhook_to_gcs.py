@@ -333,15 +333,11 @@ def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
         return False
 
 
-# Global aggregator for HTTP endpoint access
-aggregator = None
-
 async def coinbase_stream():
     """
     Connect to Coinbase WebSocket and aggregate into 1-minute rows
-    Buffer 60 rows in memory, write to GCS when triggered by Airflow
+    NOTE: This is not used directly - Airflow DAG runs the ETL
     """
-    global aggregator
     aggregator = MinuteAggregator()
     tick_count = 0
     minute_count = 0
@@ -436,48 +432,11 @@ async def coinbase_stream():
             await asyncio.sleep(5)
 
 
-def flush_to_gcs():
-    """
-    HTTP endpoint handler: Flush current hourly buffer to GCS
-    Called by Airflow every hour
-    """
-    global aggregator
-    if aggregator is None or len(aggregator.hourly_buffer) == 0:
-        return {"status": "no_data", "rows": 0}
-    
-    rows = aggregator.hourly_buffer.copy()
-    success = write_parquet_to_gcs(rows, GCS_BUCKET)
-    
-    if success:
-        aggregator.hourly_buffer.clear()
-        return {"status": "success", "rows": len(rows)}
-    else:
-        return {"status": "error", "rows": 0}
-
-
-def start_http_server():
-    """Start HTTP server for Airflow triggers"""
-    from flask import Flask, jsonify
-    app = Flask(__name__)
-    
-    @app.route('/flush', methods=['POST'])
-    def flush():
-        result = flush_to_gcs()
-        return jsonify(result)
-    
-    @app.route('/health', methods=['GET'])
-    def health():
-        global aggregator
-        return jsonify({
-            "status": "healthy",
-            "buffer_size": len(aggregator.hourly_buffer) if aggregator else 0
-        })
-    
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-
 def main():
+    """
+    This file is imported by Airflow DAG, not run standalone.
+    Airflow DAG runs the ETL every hour.
+    """
     logger.info("=" * 70)
     logger.info("BATCH LAYER: Coinbase WebSocket -> 1-Min Aggregation -> 60 rows/hour")
     logger.info("=" * 70)
@@ -485,16 +444,10 @@ def main():
     logger.info(f"Output: gs://{GCS_BUCKET}/{{year}}/{{month}}/{{day}}/btc_1h_{{hour}}.parquet")
     logger.info(f"Format: 1 Parquet file per hour with 60 rows (1 row = 1 minute)")
     logger.info(f"Features: Same as data-pipeline/kafka_1min_aggregator.py")
-    logger.info(f"Trigger: Airflow DAG every hour (0 * * * *)")
+    logger.info(f"Orchestration: Airflow DAG (0 * * * *)")
     logger.info("=" * 70)
-    
-    # Start HTTP server in background thread for Airflow triggers
-    import threading
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
-    
-    # Start WebSocket stream
-    asyncio.run(coinbase_stream())
+    logger.info("Use Airflow to run this ETL, not standalone!")
+    logger.info("=" * 70)
 
 
 if __name__ == '__main__':
