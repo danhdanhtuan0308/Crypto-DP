@@ -8,3 +8,5 @@ pandas>=2.3.3
 python-dateutil>=2.9.0
 apache-airflow>=2.8.1
 websockets>=15.0.1
+flask>=3.0.0
+requests>=2.31.0

@@ -1,11 +1,13 @@
 """
-Batch Layer: Coinbase WebSocket -> 1-Hour Aggregation -> Parquet to GCS
-Same ETL logic as data-pipeline (kafka_1min_aggregator.py)
+Batch Layer: Coinbase WebSocket -> 1-Min Aggregation -> 60 rows per hour -> Parquet to GCS
+Exact same ETL logic as data-pipeline/kafka_1min_aggregator.py
 
 Source: Coinbase WebSocket (BTC-USD ticker)
-Output: gs://batch-btc-1h/{year}/{month}/{day}/btc_1h_{hour}.parquet
+Process: Aggregate every 1 minute (same as kafka_1min_aggregator.py)
+Output: gs://batch-btc-1h-east1/{year}/{month}/{day}/btc_1h_{hour}.parquet
+Format: 1 Parquet file per hour with 60 rows (1 row = 1 minute of data)
 
-Production: 1 Parquet file per hour
+Airflow triggers write to GCS every hour
 
 ALL TIMESTAMPS IN EASTERN TIME (EST/EDT)
 """
@@ -46,57 +48,79 @@ PRODUCT_ID = "BTC-USD"
 GCS_BUCKET = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
 
 
-class HourAggregator:
+class MinuteAggregator:
     """
-    Aggregate Coinbase trades into 1-hour OHLCV candles
-    Same logic as kafka_1min_aggregator.py but for 1-hour windows
+    Aggregate Coinbase ticks into 1-minute candles
+    EXACT SAME LOGIC as data-pipeline/kafka_1min_aggregator.py
+    Stores 60 rows (60 minutes) before writing to GCS
     """
     
     def __init__(self):
-        self.window_data = []
+        self.window_data = []  # 1-second ticks for current minute
+        self.hourly_buffer = []  # 60 rows of 1-minute aggregated data
+        self.current_minute = None
         self.current_hour = None
         self.window_start = None
         
+    def _get_est_minute(self):
+        """Get current minute rounded down in EST"""
+        now_est = datetime.now(EASTERN)
+        return now_est.replace(second=0, microsecond=0)
+    
     def _get_est_hour(self):
         """Get current hour rounded down in EST"""
         now_est = datetime.now(EASTERN)
         return now_est.replace(minute=0, second=0, microsecond=0)
     
-    def add_trade(self, trade_data):
+    def add_tick(self, tick_data):
         """
-        Add a trade to the current window
-        Returns aggregated data if hour is complete, None otherwise
+        Add a tick to the current 1-minute window
+        Returns hourly data (60 rows) if hour is complete, None otherwise
         """
+        current_minute = self._get_est_minute()
         current_hour = self._get_est_hour()
         
-        # Initialize on first trade
-        if self.current_hour is None:
+        # Initialize on first tick
+        if self.current_minute is None:
+            self.current_minute = current_minute
             self.current_hour = current_hour
-            self.window_start = current_hour
-            self.window_data = [trade_data]
+            self.window_start = current_minute
+            self.window_data = [tick_data]
             return None
         
-        # New hour started - flush previous hour and start new window
-        if current_hour > self.current_hour:
-            result = self._flush()
-            self.current_hour = current_hour
-            self.window_start = current_hour
-            self.window_data = [trade_data]
+        # New minute started - aggregate the completed minute
+        if current_minute > self.current_minute:
+            minute_agg = self._aggregate_minute()
+            if minute_agg:
+                self.hourly_buffer.append(minute_agg)
+            
+            # Check if new hour started - flush hourly buffer
+            if current_hour > self.current_hour:
+                result = self.hourly_buffer.copy() if len(self.hourly_buffer) > 0 else None
+                self.hourly_buffer = []
+                self.current_hour = current_hour
+            else:
+                result = None
+            
+            # Start new minute window
+            self.current_minute = current_minute
+            self.window_start = current_minute
+            self.window_data = [tick_data]
             return result
         
-        # Same hour - add to current window
-        self.window_data.append(trade_data)
+        # Same minute - add to current window
+        self.window_data.append(tick_data)
         return None
     
-    def _flush(self):
+    def _aggregate_minute(self):
         """
-        Calculate 1-hour aggregation from collected trades
-        Same logic as kafka_1min_aggregator.py but for 1-hour windows
+        Calculate 1-minute aggregation from collected ticks
+        EXACT SAME LOGIC as kafka_1min_aggregator.py
         """
         if not self.window_data:
             return None
         
-        prices = [t['price'] for t in self.window_data if t.get('price', 0) > 0]
+        prices = [d['price'] for d in self.window_data if d.get('price', 0) > 0]
         if not prices:
             return None
         
@@ -107,14 +131,20 @@ class HourAggregator:
         close_price = prices[-1]
         
         # Volume aggregation
-        total_volume = sum(t.get('quantity', 0) for t in self.window_data)
-        buy_volume = sum(t.get('quantity', 0) for t in self.window_data if not t.get('is_buyer_maker', True))
-        sell_volume = sum(t.get('quantity', 0) for t in self.window_data if t.get('is_buyer_maker', True))
+        total_volume = sum(d.get('volume_1s', 0) for d in self.window_data)
+        total_buy_volume = sum(d.get('buy_volume_1s', 0) for d in self.window_data)
+        total_sell_volume = sum(d.get('sell_volume_1s', 0) for d in self.window_data)
         
-        # Trade count
-        trade_count = len(self.window_data)
+        # Total trades
+        total_trades = sum(d.get('trade_count_1s', 0) for d in self.window_data)
         
-        # VOLATILITY: Standard deviation of price returns
+        # Pass-through (latest value)
+        latest_data = self.window_data[-1]
+        volume_24h = latest_data.get('volume_24h', 0)
+        high_24h = latest_data.get('high_24h', 0)
+        low_24h = latest_data.get('low_24h', 0)
+        
+        # VOLATILITY: Standard deviation of 1-second price returns
         price_returns = []
         for i in range(1, len(prices)):
             if prices[i-1] > 0:
@@ -128,71 +158,63 @@ class HourAggregator:
         else:
             volatility_1m = ((high_price - low_price) / open_price * 100) if open_price > 0 else 0
         
-        # ORDER IMBALANCE RATIO
-        total_traded = buy_volume + sell_volume
-        order_imbalance = (buy_volume - sell_volume) / total_traded if total_traded > 0 else 0
+        # ORDER IMBALANCE RATIO: (BuyVol - SellVol) / (BuyVol + SellVol)
+        total_volume_traded = total_buy_volume + total_sell_volume
+        if total_volume_traded > 0:
+            order_imbalance_ratio_1m = (total_buy_volume - total_sell_volume) / total_volume_traded
+        else:
+            order_imbalance_ratio_1m = 0.0
         
         # Price change
-        price_change = close_price - open_price
-        price_change_pct = (price_change / open_price * 100) if open_price > 0 else 0
+        price_change_1m = close_price - open_price
+        price_change_percent_1m = (price_change_1m / open_price * 100) if open_price > 0 else 0.0
         
         # Average buy/sell ratio
-        buy_sell_ratios = [t.get('buy_sell_ratio', 0) for t in self.window_data if t.get('buy_sell_ratio', 0) > 0]
+        buy_sell_ratios = [d.get('buy_sell_ratio', 0) for d in self.window_data if d.get('buy_sell_ratio', 0) > 0]
         avg_buy_sell_ratio_1m = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0.0
         
-        # VWAP
-        total_value = sum(t.get('price', 0) * t.get('quantity', 0) for t in self.window_data)
-        vwap = total_value / total_volume if total_volume > 0 else close_price
-        
-        # Pass-through (latest value)
-        latest_data = self.window_data[-1] if self.window_data else {}
-        volume_24h = latest_data.get('volume_24h', 0)
-        high_24h = latest_data.get('high_24h', 0)
-        low_24h = latest_data.get('low_24h', 0)
-        
         # MICROSTRUCTURE METRICS (aggregated from 1s data)
-        import numpy as np
         
         # 1. Bid-Ask Spread (average over 1 minute)
-        spreads = [t.get('bid_ask_spread_1s', 0) for t in self.window_data if t.get('bid_ask_spread_1s', 0) > 0]
+        spreads = [d.get('bid_ask_spread_1s', 0) for d in self.window_data if d.get('bid_ask_spread_1s', 0) > 0]
         avg_bid_ask_spread_1m = np.mean(spreads) if spreads else 0
         
         # 2. Order Book Depth 2% (average over 1 minute)
-        depths = [t.get('depth_2pct_1s', 0) for t in self.window_data if t.get('depth_2pct_1s', 0) > 0]
+        depths = [d.get('depth_2pct_1s', 0) for d in self.window_data if d.get('depth_2pct_1s', 0) > 0]
         avg_depth_2pct_1m = np.mean(depths) if depths else 0
         
-        bid_depths = [t.get('bid_depth_2pct_1s', 0) for t in self.window_data if t.get('bid_depth_2pct_1s', 0) > 0]
+        bid_depths = [d.get('bid_depth_2pct_1s', 0) for d in self.window_data if d.get('bid_depth_2pct_1s', 0) > 0]
         avg_bid_depth_2pct_1m = np.mean(bid_depths) if bid_depths else 0
         
-        ask_depths = [t.get('ask_depth_2pct_1s', 0) for t in self.window_data if t.get('ask_depth_2pct_1s', 0) > 0]
+        ask_depths = [d.get('ask_depth_2pct_1s', 0) for d in self.window_data if d.get('ask_depth_2pct_1s', 0) > 0]
         avg_ask_depth_2pct_1m = np.mean(ask_depths) if ask_depths else 0
         
         # 3. VWAP (average over 1 minute)
-        vwaps = [t.get('vwap_1s', 0) for t in self.window_data if t.get('vwap_1s', 0) > 0]
+        vwaps = [d.get('vwap_1s', 0) for d in self.window_data if d.get('vwap_1s', 0) > 0]
         avg_vwap_1m = np.mean(vwaps) if vwaps else 0
         
         # 4. Micro-Price Deviation (average over 1 minute)
-        micro_deviations = [t.get('micro_price_deviation_1s', 0) for t in self.window_data]
+        micro_deviations = [d.get('micro_price_deviation_1s', 0) for d in self.window_data]
         avg_micro_price_deviation_1m = np.mean(micro_deviations) if micro_deviations else 0
         
         # 5. CVD (Cumulative Volume Delta) - use latest value as it's cumulative
         cvd_1m = latest_data.get('cvd_1s', 0)
         
         # 6. Order Flow Imbalance (sum over 1 minute)
-        ofi_values = [t.get('ofi_1s', 0) for t in self.window_data]
+        ofi_values = [d.get('ofi_1s', 0) for d in self.window_data]
         total_ofi_1m = sum(ofi_values)
         avg_ofi_1m = np.mean(ofi_values) if ofi_values else 0
         
         # 7. Kyle's Lambda (average over 1 minute)
-        lambdas = [t.get('kyles_lambda_1s', 0) for t in self.window_data if t.get('kyles_lambda_1s', 0) != 0]
+        lambdas = [d.get('kyles_lambda_1s', 0) for d in self.window_data if d.get('kyles_lambda_1s', 0) != 0]
         avg_kyles_lambda_1m = np.mean(lambdas) if lambdas else 0
         
         # 8. Liquidity Health (average over 1 minute)
-        health_values = [t.get('liquidity_health_1s', 0) for t in self.window_data if t.get('liquidity_health_1s', 0) > 0]
+        health_values = [d.get('liquidity_health_1s', 0) for d in self.window_data if d.get('liquidity_health_1s', 0) > 0]
         avg_liquidity_health_1m = np.mean(health_values) if health_values else 0
         
         # 9. Mid-Price (average over 1 minute)
-        mid_prices = [t.get('mid_price_1s', 0) for t in self.window_data if t.get('mid_price_1s', 0) > 0]
+        mid_prices = [d.get('mid_price_1s', 0) for d in self.window_data if d.get('mid_price_1s', 0) > 0]
         avg_mid_price_1m = np.mean(mid_prices) if mid_prices else 0
         
         # 10. Best Bid/Ask (latest values)
@@ -209,10 +231,10 @@ class HourAggregator:
         
         # Timestamps
         window_start_ms = int(self.window_start.timestamp() * 1000)
-        window_end_ms = window_start_ms + 3600000  # +1 hour in milliseconds
+        window_end_ms = window_start_ms + 60000  # +60 seconds in milliseconds
         
         return {
-            'symbol': 'BTC-USD',
+            'symbol': latest_data.get('symbol', 'BTC-USD'),
             'window_start': window_start_ms,
             'window_end': window_end_ms,
             'window_start_est': self.window_start.strftime('%Y-%m-%d %H:%M:%S'),
@@ -225,8 +247,8 @@ class HourAggregator:
             
             # Volume
             'total_volume_1m': total_volume,
-            'total_buy_volume_1m': buy_volume,
-            'total_sell_volume_1m': sell_volume,
+            'total_buy_volume_1m': total_buy_volume,
+            'total_sell_volume_1m': total_sell_volume,
             
             # Pass-through from source
             'volume_24h': volume_24h,
@@ -235,13 +257,13 @@ class HourAggregator:
             
             # EXISTING FEATURES
             'volatility_1m': volatility_1m,
-            'order_imbalance_ratio_1m': order_imbalance,
+            'order_imbalance_ratio_1m': order_imbalance_ratio_1m,
             
             # Additional metrics
-            'trade_count_1m': trade_count,
+            'trade_count_1m': total_trades,
             'avg_buy_sell_ratio_1m': avg_buy_sell_ratio_1m,
-            'price_change_1m': price_change,
-            'price_change_percent_1m': price_change_pct,
+            'price_change_1m': price_change_1m,
+            'price_change_percent_1m': price_change_percent_1m,
             'num_ticks': len(self.window_data),
             'last_ingestion_time': latest_data.get('ingestion_time', datetime.now(EASTERN).isoformat()),
             
@@ -261,21 +283,22 @@ class HourAggregator:
             'latest_best_bid_1m': latest_best_bid,
             'latest_best_ask_1m': latest_best_ask,
             'volatility_regime': volatility_regime,
-            
-            # Metadata
-            'batch_processed': True,
-            'batch_processing_time': datetime.now(EASTERN).isoformat(),
         }
 
 
-def write_parquet_to_gcs(data: dict, bucket_name: str):
-    """Write aggregated 1-hour data as Parquet to GCS"""
+def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
+    """Write 60 rows of 1-minute data as Parquet to GCS (triggered by Airflow every hour)"""
+    if not hourly_rows or len(hourly_rows) == 0:
+        logger.warning("No data to write")
+        return False
+    
     try:
         client = storage.Client()
         bucket = client.bucket(bucket_name)
         
-        # Parse timestamp for path
-        window_start_est = datetime.strptime(data['window_start_est'], '%Y-%m-%d %H:%M:%S')
+        # Use first row's timestamp for file path
+        first_row = hourly_rows[0]
+        window_start_est = datetime.strptime(first_row['window_start_est'], '%Y-%m-%d %H:%M:%S')
         window_start_est = EASTERN.localize(window_start_est)
         
         # Path: {year}/{month}/{day}/btc_1h_{hour}.parquet
@@ -286,8 +309,8 @@ def write_parquet_to_gcs(data: dict, bucket_name: str):
         
         blob_path = f"{year}/{month}/{day}/btc_1h_{hour}.parquet"
         
-        # Convert to PyArrow table
-        table = pa.Table.from_pydict({k: [v] for k, v in data.items()})
+        # Convert list of dicts to PyArrow table (60 rows)
+        table = pa.Table.from_pylist(hourly_rows)
         
         # Write to buffer
         buffer = io.BytesIO()
@@ -299,10 +322,9 @@ def write_parquet_to_gcs(data: dict, bucket_name: str):
         blob.upload_from_file(buffer, content_type='application/octet-stream')
         
         logger.info(
-            f"PARQUET: gs://{bucket_name}/{blob_path} | "
-            f"O:{data['open']:.2f} H:{data['high']:.2f} L:{data['low']:.2f} C:{data['close']:.2f} | "
-            f"Vol:{data['total_volume_1m']:.4f} | Trades:{data['trade_count_1m']} | "
-            f"EST: {data['window_start_est']}"
+            f"✅ PARQUET: gs://{bucket_name}/{blob_path} | "
+            f"{len(hourly_rows)} rows (1-min each) | "
+            f"Hour: {hour}:00 EST"
         )
         return True
         
@@ -311,10 +333,18 @@ def write_parquet_to_gcs(data: dict, bucket_name: str):
         return False
 
 
+# Global aggregator for HTTP endpoint access
+aggregator = None
+
 async def coinbase_stream():
-    """Connect to Coinbase WebSocket and aggregate trades into 1-hour Parquet files"""
-    aggregator = HourAggregator()
-    trade_count = 0
+    """
+    Connect to Coinbase WebSocket and aggregate into 1-minute rows
+    Buffer 60 rows in memory, write to GCS when triggered by Airflow
+    """
+    global aggregator
+    aggregator = MinuteAggregator()
+    tick_count = 0
+    minute_count = 0
     files_written = 0
     last_status = time.time()
     
@@ -334,7 +364,7 @@ async def coinbase_stream():
                     "channels": ["ticker"]
                 }
                 await ws.send(json.dumps(subscribe_msg))
-                logger.info(f"Connected to Coinbase WebSocket - subscribed to {PRODUCT_ID}")
+                logger.info(f"✅ Connected to Coinbase WebSocket - {PRODUCT_ID}")
                 
                 while True:
                     try:
@@ -346,50 +376,124 @@ async def coinbase_stream():
                             continue
                         
                         # Parse Coinbase ticker format (same as data-pipeline)
-                        trade = {
+                        tick = {
                             'price': float(data.get('price', 0)),
-                            'quantity': float(data.get('volume_24h', 0)),
-                            'is_buyer_maker': False,  # Not available in ticker
+                            'volume_1s': float(data.get('last_size', 0)),
+                            'buy_volume_1s': 0,  # Not available in ticker
+                            'sell_volume_1s': 0,
+                            'trade_count_1s': 1,
+                            'volume_24h': float(data.get('volume_24h', 0)),
+                            'high_24h': float(data.get('high_24h', 0)),
+                            'low_24h': float(data.get('low_24h', 0)),
                             'trade_time': data.get('time', ''),
+                            'symbol': PRODUCT_ID,
+                            'ingestion_time': datetime.now(EASTERN).isoformat(),
+                            # Microstructure metrics - set to 0 since not available in ticker
+                            'bid_ask_spread_1s': 0,
+                            'depth_2pct_1s': 0,
+                            'bid_depth_2pct_1s': 0,
+                            'ask_depth_2pct_1s': 0,
+                            'vwap_1s': 0,
+                            'micro_price_deviation_1s': 0,
+                            'cvd_1s': 0,
+                            'ofi_1s': 0,
+                            'kyles_lambda_1s': 0,
+                            'liquidity_health_1s': 0,
+                            'mid_price_1s': 0,
+                            'best_bid_1s': 0,
+                            'best_ask_1s': 0,
+                            'buy_sell_ratio': 0,
                         }
                         
-                        trade_count += 1
+                        tick_count += 1
                         
-                        # Add to aggregator - returns data when minute is complete
-                        agg_result = aggregator.add_trade(trade)
+                        # Add to aggregator - returns 60 rows when hour is complete
+                        hourly_data = aggregator.add_tick(tick)
                         
-                        if agg_result:
-                            if write_parquet_to_gcs(agg_result, GCS_BUCKET):
+                        if hourly_data:
+                            # Write 60 rows to GCS
+                            if write_parquet_to_gcs(hourly_data, GCS_BUCKET):
                                 files_written += 1
+                                logger.info(f"📦 Wrote {len(hourly_data)} rows to GCS (Hour complete)")
                         
                         # Status log every 30s
                         if time.time() - last_status >= 30:
                             logger.info(
-                                f"Status | Trades: {trade_count} | "
-                                f"Buffer: {len(aggregator.window_data)} | "
-                                f"Parquet files: {files_written}"
+                                f"📊 Ticks: {tick_count} | "
+                                f"Minute buffer: {len(aggregator.window_data)} | "
+                                f"Hour buffer: {len(aggregator.hourly_buffer)}/60 | "
+                                f"Files: {files_written}"
                             )
                             last_status = time.time()
                             
                     except asyncio.TimeoutError:
-                        logger.debug("Timeout, sending ping...")
+                        logger.debug("⏱️ Timeout, sending ping...")
                         await ws.ping()
                         
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-            logger.info("Reconnecting in 5s...")
+            logger.error(f"❌ WebSocket error: {e}")
+            logger.info("🔄 Reconnecting in 5s...")
             await asyncio.sleep(5)
+
+
+def flush_to_gcs():
+    """
+    HTTP endpoint handler: Flush current hourly buffer to GCS
+    Called by Airflow every hour
+    """
+    global aggregator
+    if aggregator is None or len(aggregator.hourly_buffer) == 0:
+        return {"status": "no_data", "rows": 0}
+    
+    rows = aggregator.hourly_buffer.copy()
+    success = write_parquet_to_gcs(rows, GCS_BUCKET)
+    
+    if success:
+        aggregator.hourly_buffer.clear()
+        return {"status": "success", "rows": len(rows)}
+    else:
+        return {"status": "error", "rows": 0}
+
+
+def start_http_server():
+    """Start HTTP server for Airflow triggers"""
+    from flask import Flask, jsonify
+    app = Flask(__name__)
+    
+    @app.route('/flush', methods=['POST'])
+    def flush():
+        result = flush_to_gcs()
+        return jsonify(result)
+    
+    @app.route('/health', methods=['GET'])
+    def health():
+        global aggregator
+        return jsonify({
+            "status": "healthy",
+            "buffer_size": len(aggregator.hourly_buffer) if aggregator else 0
+        })
+    
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
 
 def main():
     logger.info("=" * 70)
-    logger.info("BATCH LAYER: Coinbase WebSocket -> 1-Hour Aggregation -> Parquet")
+    logger.info("BATCH LAYER: Coinbase WebSocket -> 1-Min Aggregation -> 60 rows/hour")
     logger.info("=" * 70)
-    logger.info(f"Source: Coinbase WebSocket ({COINBASE_WS_URL})")
+    logger.info(f"Source: {COINBASE_WS_URL} ({PRODUCT_ID})")
     logger.info(f"Output: gs://{GCS_BUCKET}/{{year}}/{{month}}/{{day}}/btc_1h_{{hour}}.parquet")
-    logger.info(f"Interval: 1 hour (production mode)")
+    logger.info(f"Format: 1 Parquet file per hour with 60 rows (1 row = 1 minute)")
+    logger.info(f"Features: Same as data-pipeline/kafka_1min_aggregator.py")
+    logger.info(f"Trigger: Airflow DAG every hour (0 * * * *)")
     logger.info("=" * 70)
     
+    # Start HTTP server in background thread for Airflow triggers
+    import threading
+    http_thread = threading.Thread(target=start_http_server, daemon=True)
+    http_thread.start()
+    
+    # Start WebSocket stream
     asyncio.run(coinbase_stream())
 
 

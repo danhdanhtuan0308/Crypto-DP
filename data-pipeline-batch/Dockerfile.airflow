@@ -1,0 +1,27 @@
+# Dockerfile for Airflow scheduler
+FROM apache/airflow:2.8.1-python3.11
+
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+USER airflow
+
+# Copy requirements and install
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Copy DAGs
+COPY dags /opt/airflow/dags
+
+WORKDIR /opt/airflow
+
+ENV PYTHONUNBUFFERED=1
+ENV AIRFLOW_HOME=/opt/airflow
+ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor
+ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
+
+# Initialize Airflow DB and start services
+CMD ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true && airflow webserver & airflow scheduler"]

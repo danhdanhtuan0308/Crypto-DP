@@ -1,23 +1,18 @@
 """
-Airflow DAG for Batch Layer Validation (Lambda Architecture)
+Airflow DAG: Batch Layer - Write 60 rows (1-min data) to GCS every hour
 
-This DAG validates the batch layer data collection:
-- Production: Triggers every 1 hour (0 * * * *)
-- Validates raw data from Coinbase WebSocket collector
-- Checks data completeness and file sizes
-- Provides fault tolerance and monitoring
-
-Raw data is collected continuously by raw_webhook_to_gcs.py service.
-Airflow only validates and monitors the data collection.
+Triggered: Every hour at minute 0 (0 * * * *)
+Action: Signals the batch collector to flush its hourly buffer to GCS
 """
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 from datetime import datetime, timedelta
+import requests
+import os
 
 
-# DAG Configuration
 default_args = {
     'owner': 'crypto-dp',
     'depends_on_past': False,
@@ -25,176 +20,106 @@ default_args = {
     'email_on_retry': False,
     'retries': 3,
     'retry_delay': timedelta(minutes=2),
-    'execution_timeout': timedelta(minutes=15),
+    'execution_timeout': timedelta(minutes=10),
 }
 
 
-def monitor_data_collection(**context):
-    """Monitor the raw data collection from Coinbase WebSocket"""
+def trigger_batch_write(**context):
+    """
+    Trigger the batch collector to write buffered data to GCS
+    The collector service exposes an HTTP endpoint for this
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get the batch collector service URL from environment
+    collector_url = os.getenv('BATCH_COLLECTOR_URL', 'http://localhost:5000')
+    
+    try:
+        # Send trigger to batch collector
+        response = requests.post(f"{collector_url}/flush", timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"✅ Batch write successful: {result}")
+            return result
+        else:
+            raise Exception(f"Batch write failed: {response.status_code} - {response.text}")
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger batch write: {e}")
+        raise
+
+
+def validate_gcs_data(**context):
+    """Validate that data was written to GCS"""
     from google.cloud import storage
-    from datetime import datetime, timedelta
     import pytz
-    import os
     import json
+    import logging
     
+    logger = logging.getLogger(__name__)
     EASTERN = pytz.timezone('America/New_York')
-    now_est = datetime.now(EASTERN)
-    previous_hour = now_est - timedelta(hours=1)
     
-    year = previous_hour.strftime('%Y')
-    month = previous_hour.strftime('%m')
-    day = previous_hour.strftime('%d')
-    hour = previous_hour.strftime('%H')
+    # Get current hour in EST
+    now_est = datetime.now(EASTERN)
+    current_hour = now_est.replace(minute=0, second=0, microsecond=0)
+    
+    year = current_hour.strftime('%Y')
+    month = current_hour.strftime('%m')
+    day = current_hour.strftime('%d')
+    hour = current_hour.strftime('%H')
+    
+    bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
     
     # Initialize GCS client
-    bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
-    
-    creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
     if creds_json:
         from google.oauth2 import service_account
         creds_dict = json.loads(creds_json)
         credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id', 'crypto-dp'))
+        storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
     else:
         storage_client = storage.Client()
     
     bucket = storage_client.bucket(bucket_name)
-    prefix = f"{year}/{month}/{day}/"
+    blob_path = f"{year}/{month}/{day}/btc_1h_{hour}.parquet"
+    blob = bucket.blob(blob_path)
     
-    blobs = list(bucket.list_blobs(prefix=prefix))
-    total_size = sum(blob.size for blob in blobs)
+    if not blob.exists():
+        raise Exception(f"❌ File not found: gs://{bucket_name}/{blob_path}")
     
-    if not blobs:
-        logger.warning(f"No data collected for {year}-{month}-{day} {hour}:00 EST")
-        return f"No data found"
+    # Check file size
+    blob.reload()
+    if blob.size == 0:
+        raise Exception(f"❌ Empty file: gs://{bucket_name}/{blob_path}")
     
-    print(f"✓ Data collection healthy: {len(blobs)} files, {total_size/1024/1024:.2f} MB for {year}-{month}-{day} {hour}:00 EST")
-    return len(blobs)
-
-
-def check_raw_data_availability(**context):
-    """Check if raw data is available in the current hour"""
-    from google.cloud import storage
-    from datetime import datetime, timedelta
-    import pytz
-    import os
-    import json
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    EASTERN = pytz.timezone('America/New_York')
-    now_est = datetime.now(EASTERN)
-    current_hour = now_est.replace(minute=0, second=0, microsecond=0)
-    
-    year = current_hour.strftime('%Y')
-    month = current_hour.strftime('%m')
-    day = current_hour.strftime('%d')
-    hour = current_hour.strftime('%H')
-    
-    # Initialize GCS client - batch-btc-1h-east1 bucket
-    bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
-    
-    creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    if creds_json:
-        from google.oauth2 import service_account
-        creds_dict = json.loads(creds_json)
-        credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id', 'crypto-dp'))
-    else:
-        storage_client = storage.Client()
-    
-    bucket = storage_client.bucket(bucket_name)
-    prefix = f"{year}/{month}/{day}/"
-    
-    blobs = list(bucket.list_blobs(prefix=prefix))
-    
-    if not blobs:
-        logger.warning(f"No raw data found for {year}-{month}-{day} {hour}:00 EST - May be first run")
-        return 0
-    
-    print(f"✓ Found {len(blobs)} raw data files for {year}-{month}-{day} {hour}:00 EST")
-    return len(blobs)
-
-
-def validate_batch_output(**context):
-    """Validate that batch data was written successfully"""
-    from google.cloud import storage
-    from datetime import datetime, timedelta
-    import pytz
-    import os
-    import json
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    EASTERN = pytz.timezone('America/New_York')
-    now_est = datetime.now(EASTERN)
-    current_hour = now_est.replace(minute=0, second=0, microsecond=0)
-    
-    year = current_hour.strftime('%Y')
-    month = current_hour.strftime('%m')
-    day = current_hour.strftime('%d')
-    hour = current_hour.strftime('%H')
-    
-    # Initialize GCS client - batch-btc-1h-east1 bucket
-    bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
-    
-    creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    if creds_json:
-        from google.oauth2 import service_account
-        creds_dict = json.loads(creds_json)
-        credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id', 'crypto-dp'))
-    else:
-        storage_client = storage.Client()
-    
-    bucket = storage_client.bucket(bucket_name)
-    prefix = f"{year}/{month}/{day}/"
-    
-    blobs = list(bucket.list_blobs(prefix=prefix))
-    
-    if not blobs:
-        logger.warning(f"No batch data found in gs://{bucket_name}/{prefix} - May be first run")
-        return 0
-    
-    # Check file sizes
-    total_size = 0
-    for blob in blobs:
-        if blob.size == 0:
-            logger.error(f"Empty file detected: {blob.name}")
-        total_size += blob.size
-    
-    print(f"✓ Validated {len(blobs)} batch files ({total_size/1024/1024:.2f} MB) in gs://{bucket_name}/{prefix}")
+    logger.info(f"✅ Validated: gs://{bucket_name}/{blob_path} ({blob.size/1024:.2f} KB)")
     return True
 
 
-# Production DAG - 1 hour schedule
+# Production DAG - runs every hour
 with DAG(
     'batch_etl_1hour_prod',
     default_args=default_args,
-    description='Batch ETL every 1 hour (PRODUCTION)',
+    description='Batch Layer: Write 60 rows to GCS every hour',
     schedule_interval='0 * * * *',  # Every hour at minute 0
     start_date=days_ago(1),
     catchup=False,
     tags=['batch', 'etl', 'production', '1hour'],
-) as dag_1hour:
+) as dag:
     
-    check_data_prod = PythonOperator(
-        task_id='check_raw_data',
-        python_callable=check_raw_data_availability,
+    trigger_write = PythonOperator(
+        task_id='trigger_batch_write',
+        python_callable=trigger_batch_write,
         provide_context=True,
     )
     
-    monitor_collection_prod = PythonOperator(
-        task_id='monitor_data_collection',
-        python_callable=monitor_data_collection,
-        provide_context=True,
-    )
-    
-    validate_output_prod = PythonOperator(
-        task_id='validate_batch_output',
-        python_callable=validate_batch_output,
+    validate_data = PythonOperator(
+        task_id='validate_gcs_data',
+        python_callable=validate_gcs_data,
         provide_context=True,
     )
     
     # Task dependencies
-    check_data_prod >> monitor_collection_prod >> validate_output_prod
+    trigger_write >> validate_data

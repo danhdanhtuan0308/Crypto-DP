@@ -1,25 +1,25 @@
-# Railway Dockerfile for Batch Layer
+# Dockerfile for Batch Collector Service
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the necessary files for Railway deployment
+# Copy application code
 COPY raw_webhook_to_gcs.py .
-COPY start_railway.sh .
 
-# Make script executable
-RUN chmod +x start_railway.sh
-
-# Railway will provide PORT, but we don't need it for this service
+# Environment variables
 ENV GCS_BUCKET=batch-btc-1h-east1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
 
-CMD ["./start_railway.sh"]
+# Run the batch collector
+CMD ["python", "raw_webhook_to_gcs.py"]
