@@ -3,6 +3,6 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.airflow"
 
 [deploy]
-startCommand = "bash -c 'airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true && airflow webserver & airflow scheduler'"
+startCommand = "bash -c 'airflow db init && airflow users create --username ${AIRFLOW_USERNAME:-cryptodp} --password ${AIRFLOW_PASSWORD:-CryptoDP2025!} --firstname Crypto --lastname Admin --role Admin --email admin@cryptodp.com || true && airflow webserver -p 8080 & airflow scheduler'"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
