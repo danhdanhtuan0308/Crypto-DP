@@ -1,33 +1,20 @@
 #!/bin/bash
 set -e
 
-echo "=========================================="
-echo "Initializing Airflow..."
-echo "=========================================="
-
-# Initialize database
-echo "Running database migration..."
+echo "Initializing Airflow database..."
 airflow db migrate
 
-# Create admin user
 echo "Creating admin user..."
-USERNAME=${AIRFLOW_USERNAME:-admin}
-PASSWORD=${AIRFLOW_PASSWORD:-admin}
-
-echo "Using username: $USERNAME"
-
-# Try to create user
 airflow users create \
-    --username "$USERNAME" \
-    --password "$PASSWORD" \
-    --firstname Crypto \
-    --lastname Admin \
+    --username ${AIRFLOW_USERNAME:-admin} \
+    --password ${AIRFLOW_PASSWORD:-admin} \
+    --firstname Admin \
+    --lastname User \
     --role Admin \
-    --email admin@cryptodp.com 2>&1 || echo "User may already exist"
+    --email admin@example.com 2>&1 || true
 
-echo "=========================================="
-echo "Starting Airflow Standalone Mode..."
-echo "=========================================="
+echo "Starting scheduler in background..."
+airflow scheduler &
 
-# Use standalone mode - combines webserver and scheduler
-exec airflow standalone
+echo "Starting webserver..."
+exec airflow webserver
