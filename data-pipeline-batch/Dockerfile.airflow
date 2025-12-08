@@ -36,5 +36,8 @@ ENV AIRFLOW_PASSWORD=CryptoDP2025
 # Expose port 8080 for Airflow webserver
 EXPOSE 8080
 
-# Initialize Airflow DB and start services
-CMD ["bash", "-c", "airflow db init && airflow users create --username ${AIRFLOW_USERNAME} --password ${AIRFLOW_PASSWORD} --firstname Crypto --lastname Admin --role Admin --email admin@cryptodp.com || true && airflow webserver -p 8080 & airflow scheduler"]
+# Initialize Airflow DB and create user, then start services
+CMD ["bash", "-c", "airflow db migrate && \
+     airflow users create --username ${AIRFLOW_USERNAME} --password ${AIRFLOW_PASSWORD} --firstname Crypto --lastname Admin --role Admin --email admin@cryptodp.com 2>/dev/null || true && \
+     airflow scheduler & \
+     exec airflow webserver --port 8080 --host 0.0.0.0"]
