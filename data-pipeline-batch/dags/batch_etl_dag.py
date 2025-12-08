@@ -219,18 +219,22 @@ def validate_gcs_data(**context):
         storage_client = storage.Client()
     
     bucket = storage_client.bucket(bucket_name)
-    blob_path = f"{year}/{month}/{day}/btc_1h_{hour}.parquet"
-    blob = bucket.blob(blob_path)
     
-    if not blob.exists():
-        raise Exception(f"❌ File not found: gs://{bucket_name}/{blob_path}")
+    # List all files matching the hour pattern (with timestamp)
+    prefix = f"{year}/{month}/{day}/btc_1h_{hour}_"
+    blobs = list(bucket.list_blobs(prefix=prefix))
+    
+    if not blobs:
+        raise Exception(f"❌ No files found with prefix: gs://{bucket_name}/{prefix}")
+    
+    # Get the most recent file (sorted by name, timestamp is in filename)
+    latest_blob = sorted(blobs, key=lambda b: b.name)[-1]
     
     # Check file size
-    blob.reload()
-    if blob.size == 0:
-        raise Exception(f"❌ Empty file: gs://{bucket_name}/{blob_path}")
+    if latest_blob.size == 0:
+        raise Exception(f"❌ Empty file: gs://{bucket_name}/{latest_blob.name}")
     
-    logger.info(f"✅ Validated: gs://{bucket_name}/{blob_path} ({blob.size/1024:.2f} KB)")
+    logger.info(f"✅ Validated: gs://{bucket_name}/{latest_blob.name} ({latest_blob.size/1024:.2f} KB)")
     return True
 
 

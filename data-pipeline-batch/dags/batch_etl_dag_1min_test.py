@@ -142,7 +142,7 @@ def collect_and_aggregate_data(**context):
 
 
 def write_to_gcs(**context):
-    """Write the aggregated data to GCS as Parquet - TEST VERSION"""
+    """Write the aggregated data to GCS as Parquet - TEST VERSION (separate file per minute)"""
     import logging
     logger = logging.getLogger(__name__)
     
@@ -153,22 +153,23 @@ def write_to_gcs(**context):
     if not minute_data or len(minute_data) == 0:
         raise Exception("No data collected!")
     
-    logger.info(f"🧪 TEST: Writing {len(minute_data)} row(s) to GCS...")
+    logger.info(f"🧪 TEST: Writing {len(minute_data)} row(s) to GCS (separate file per minute)...")
     
-    # Import write function
-    from raw_webhook_to_gcs import write_parquet_to_gcs, GCS_BUCKET
+    # Import TEST write function (writes separate files per minute)
+    from raw_webhook_to_gcs_test import write_parquet_to_gcs_test
+    from raw_webhook_to_gcs import GCS_BUCKET
     
-    success = write_parquet_to_gcs(minute_data, GCS_BUCKET)
+    success = write_parquet_to_gcs_test(minute_data, GCS_BUCKET)
     
     if not success:
         raise Exception("Failed to write to GCS!")
     
-    logger.info(f"✅ Successfully wrote {len(minute_data)} row(s) to GCS")
+    logger.info(f"✅ Successfully wrote {len(minute_data)} row(s) to separate file")
     return len(minute_data)
 
 
 def validate_gcs_data(**context):
-    """Validate that data was written to GCS - TEST VERSION"""
+    """Validate that data was written to GCS - TEST VERSION (checks minute-based file)"""
     from google.cloud import storage
     import pytz
     import json
@@ -177,14 +178,23 @@ def validate_gcs_data(**context):
     logger = logging.getLogger(__name__)
     EASTERN = pytz.timezone('America/New_York')
     
-    # Get current hour in EST (file is still written by hour)
-    now_est = datetime.now(EASTERN)
-    current_hour = now_est.replace(minute=0, second=0, microsecond=0)
+    # Get data from collect task to find exact timestamp
+    ti = context['task_instance']
+    minute_data = ti.xcom_pull(task_ids='collect_and_aggregate', key='minute_data')
     
-    year = current_hour.strftime('%Y')
-    month = current_hour.strftime('%m')
-    day = current_hour.strftime('%d')
-    hour = current_hour.strftime('%H')
+    if not minute_data or len(minute_data) == 0:
+        raise Exception("No data to validate!")
+    
+    # Parse timestamp from first row
+    first_row = minute_data[0]
+    window_start_est = datetime.strptime(first_row['window_start_est'], '%Y-%m-%d %H:%M:%S')
+    window_start_est = EASTERN.localize(window_start_est)
+    
+    year = window_start_est.strftime('%Y')
+    month = window_start_est.strftime('%m')
+    day = window_start_est.strftime('%d')
+    hour = window_start_est.strftime('%H')
+    minute = window_start_est.strftime('%M')
     
     bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
     
@@ -199,7 +209,7 @@ def validate_gcs_data(**context):
         storage_client = storage.Client()
     
     bucket = storage_client.bucket(bucket_name)
-    blob_path = f"{year}/{month}/{day}/btc_1h_{hour}.parquet"
+    blob_path = f"{year}/{month}/{day}/btc_1min_{hour}_{minute}.parquet"
     blob = bucket.blob(blob_path)
     
     if not blob.exists():

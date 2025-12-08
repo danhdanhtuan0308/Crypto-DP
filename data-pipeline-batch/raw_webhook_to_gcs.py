@@ -310,13 +310,14 @@ def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
         window_start_est = datetime.strptime(first_row['window_start_est'], '%Y-%m-%d %H:%M:%S')
         window_start_est = EASTERN.localize(window_start_est)
         
-        # Path: {year}/{month}/{day}/btc_1h_{hour}.parquet
+        # Path: {year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet
         year = window_start_est.strftime('%Y')
         month = window_start_est.strftime('%m')
         day = window_start_est.strftime('%d')
         hour = window_start_est.strftime('%H')
+        timestamp = datetime.now(EASTERN).strftime('%Y%m%d_%H%M%S')
         
-        blob_path = f"{year}/{month}/{day}/btc_1h_{hour}.parquet"
+        blob_path = f"{year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet"
         
         # Convert list of dicts to PyArrow table (60 rows)
         table = pa.Table.from_pylist(hourly_rows)
