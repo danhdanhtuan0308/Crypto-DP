@@ -30,7 +30,7 @@ ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
 
 # Default credentials (override via environment variables)
 ENV AIRFLOW_USERNAME=cryptodp
-ENV AIRFLOW_PASSWORD=CryptoDP2025!
+ENV AIRFLOW_PASSWORD=CryptoDP2025
 
 # Initialize Airflow DB and start services
 CMD ["bash", "-c", "airflow db init && airflow users create --username ${AIRFLOW_USERNAME} --password ${AIRFLOW_PASSWORD} --firstname Crypto --lastname Admin --role Admin --email admin@cryptodp.com || true && airflow webserver -p 8080 & airflow scheduler"]
