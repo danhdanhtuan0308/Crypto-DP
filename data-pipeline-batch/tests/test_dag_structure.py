@@ -5,7 +5,7 @@ def test_prod_dag_structure():
     dag_module = import_module("dags.batch_etl_dag")
     dag = dag_module.dag
 
-    assert dag.dag_id == "batch_etl_1hour_prod"
+    assert dag.dag_id == "batch_etl_5min_prod"
     assert dag.schedule_interval == "*/5 * * * *"
     assert dag.catchup is False
 
