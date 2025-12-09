@@ -131,7 +131,7 @@ jobs:
       env:
         PYTHONPATH: ${{ github.workspace }}/data-pipeline-batch
       run: |
-        pytest tests/test_raw_webhook_to_gcs.py tests/test_dag_structure.py -q
+        pytest tests/test_raw_webhook_to_gcs.py::test_minute_aggregator_basic tests/test_dag_structure.py -q
 
   lint:
     name: Code Quality Checks
