@@ -131,9 +131,9 @@ class MinuteAggregator:
         close_price = prices[-1]
         
         # Volume aggregation
-        total_volume = sum(d.get('volume_1s', 0.0) for d in self.window_data)
-        total_buy_volume = sum(d.get('buy_volume_1s', 0.0) for d in self.window_data)
-        total_sell_volume = sum(d.get('sell_volume_1s', 0.0) for d in self.window_data)
+        total_volume = float(sum(d.get('volume_1s', 0.0) for d in self.window_data))
+        total_buy_volume = float(sum(d.get('buy_volume_1s', 0.0) for d in self.window_data))
+        total_sell_volume = float(sum(d.get('sell_volume_1s', 0.0) for d in self.window_data))
         
         # Total trades
         total_trades = sum(d.get('trade_count_1s', 0) for d in self.window_data)
@@ -198,7 +198,7 @@ class MinuteAggregator:
         avg_micro_price_deviation_1m = np.mean(micro_deviations) if micro_deviations else 0.0
         
         # 5. CVD (Cumulative Volume Delta) - use latest value as it's cumulative
-        cvd_1m = latest_data.get('cvd_1s', 0.0)
+        cvd_1m = float(latest_data.get('cvd_1s', 0.0))
         
         # 6. Order Flow Imbalance (sum over 1 minute)
         ofi_values = [d.get('ofi_1s', 0.0) for d in self.window_data]
@@ -218,8 +218,8 @@ class MinuteAggregator:
         avg_mid_price_1m = np.mean(mid_prices) if mid_prices else 0.0
         
         # 10. Best Bid/Ask (latest values)
-        latest_best_bid = latest_data.get('best_bid_1s', 0.0)
-        latest_best_ask = latest_data.get('best_ask_1s', 0.0)
+        latest_best_bid = float(latest_data.get('best_bid_1s', 0.0))
+        latest_best_ask = float(latest_data.get('best_ask_1s', 0.0))
         
         # 11. Volatility Regime Classification
         if volatility_1m < 0.1:
