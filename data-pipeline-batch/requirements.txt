@@ -1,4 +1,4 @@
-apache-airflow==2.8.1
+apache-airflow==2.9.3
 google-cloud-storage==2.10.0
 google-auth==2.23.0
 pyarrow==14.0.2
