@@ -10,9 +10,10 @@ Real-time BTC data pipeline: **Coinbase WebSocket → Kafka → GCS → Dashboar
 - **Consumer**: Writes Parquet files to GCS (hourly partitions)
 
 **Batch Pipeline** (`data-pipeline-batch/`)
-- **Airflow DAG**: Runs every hour (0 * * * *) - collects 60 min of data
-- **ETL**: Coinbase WebSocket → 1-min aggregation → 60 rows/hour → GCS Parquet
-- **Output**: Cloud-Storage ( batch-btc-1h-east1 )
+- **Airflow DAG**: Runs every 5 minutes (*/5 * * * *) - collects 5 min of data
+- **ETL**: Coinbase WebSocket → 1-min aggregation → 5 rows per file → GCS Parquet
+- **Output**: Cloud-Storage (`batch-btc-1h-east1`)
+- **Schema Parity**: Validated against Kafka pipeline (37 features, all double types)
 
 **Dashboard** (`dashboard/`)
 - Live BTC monitoring with OHLC charts, volume, volatility
@@ -55,7 +56,6 @@ GCP_SERVICE_ACCOUNT_JSON
 AIRFLOW_USERNAME
 AIRFLOW_PASSWORD
 ```
-
 ## Local Development
 
 ```bash
@@ -66,4 +66,16 @@ pip install -r requirements.txt
 # For batch layer
 cd data-pipeline-batch
 ./start-airflow.sh           # Start Airflow (http://localhost:8080)
+```
+
+## Validation
+
+**Schema Parity Check**
+```bash
+python validate_schema_parity.py
+```
+Validates that Batch pipeline produces identical schema to Kafka pipeline:
+- ✅ All 37 columns present
+- ✅ All data types match (double for all metrics)
+- ✅ Sample data ranges verifiedtart-airflow.sh           # Start Airflow (http://localhost:8080)
 ``` 
