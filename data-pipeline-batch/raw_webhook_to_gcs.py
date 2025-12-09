@@ -131,9 +131,9 @@ class MinuteAggregator:
         close_price = prices[-1]
         
         # Volume aggregation
-        total_volume = sum(d.get('volume_1s', 0) for d in self.window_data)
-        total_buy_volume = sum(d.get('buy_volume_1s', 0) for d in self.window_data)
-        total_sell_volume = sum(d.get('sell_volume_1s', 0) for d in self.window_data)
+        total_volume = sum(d.get('volume_1s', 0.0) for d in self.window_data)
+        total_buy_volume = sum(d.get('buy_volume_1s', 0.0) for d in self.window_data)
+        total_sell_volume = sum(d.get('sell_volume_1s', 0.0) for d in self.window_data)
         
         # Total trades
         total_trades = sum(d.get('trade_count_1s', 0) for d in self.window_data)
@@ -177,49 +177,49 @@ class MinuteAggregator:
         
         # 1. Bid-Ask Spread (average over 1 minute)
         spreads = [d.get('bid_ask_spread_1s', 0) for d in self.window_data if d.get('bid_ask_spread_1s', 0) > 0]
-        avg_bid_ask_spread_1m = np.mean(spreads) if spreads else 0
+        avg_bid_ask_spread_1m = np.mean(spreads) if spreads else 0.0
         
         # 2. Order Book Depth 2% (average over 1 minute)
         depths = [d.get('depth_2pct_1s', 0) for d in self.window_data if d.get('depth_2pct_1s', 0) > 0]
-        avg_depth_2pct_1m = np.mean(depths) if depths else 0
+        avg_depth_2pct_1m = np.mean(depths) if depths else 0.0
         
         bid_depths = [d.get('bid_depth_2pct_1s', 0) for d in self.window_data if d.get('bid_depth_2pct_1s', 0) > 0]
-        avg_bid_depth_2pct_1m = np.mean(bid_depths) if bid_depths else 0
+        avg_bid_depth_2pct_1m = np.mean(bid_depths) if bid_depths else 0.0
         
         ask_depths = [d.get('ask_depth_2pct_1s', 0) for d in self.window_data if d.get('ask_depth_2pct_1s', 0) > 0]
-        avg_ask_depth_2pct_1m = np.mean(ask_depths) if ask_depths else 0
+        avg_ask_depth_2pct_1m = np.mean(ask_depths) if ask_depths else 0.0
         
         # 3. VWAP (average over 1 minute)
         vwaps = [d.get('vwap_1s', 0) for d in self.window_data if d.get('vwap_1s', 0) > 0]
-        avg_vwap_1m = np.mean(vwaps) if vwaps else 0
+        avg_vwap_1m = np.mean(vwaps) if vwaps else 0.0
         
         # 4. Micro-Price Deviation (average over 1 minute)
         micro_deviations = [d.get('micro_price_deviation_1s', 0) for d in self.window_data]
-        avg_micro_price_deviation_1m = np.mean(micro_deviations) if micro_deviations else 0
+        avg_micro_price_deviation_1m = np.mean(micro_deviations) if micro_deviations else 0.0
         
         # 5. CVD (Cumulative Volume Delta) - use latest value as it's cumulative
-        cvd_1m = latest_data.get('cvd_1s', 0)
+        cvd_1m = latest_data.get('cvd_1s', 0.0)
         
         # 6. Order Flow Imbalance (sum over 1 minute)
-        ofi_values = [d.get('ofi_1s', 0) for d in self.window_data]
-        total_ofi_1m = sum(ofi_values)
-        avg_ofi_1m = np.mean(ofi_values) if ofi_values else 0
+        ofi_values = [d.get('ofi_1s', 0.0) for d in self.window_data]
+        total_ofi_1m = float(sum(ofi_values))
+        avg_ofi_1m = np.mean(ofi_values) if ofi_values else 0.0
         
         # 7. Kyle's Lambda (average over 1 minute)
         lambdas = [d.get('kyles_lambda_1s', 0) for d in self.window_data if d.get('kyles_lambda_1s', 0) != 0]
-        avg_kyles_lambda_1m = np.mean(lambdas) if lambdas else 0
+        avg_kyles_lambda_1m = np.mean(lambdas) if lambdas else 0.0
         
         # 8. Liquidity Health (average over 1 minute)
         health_values = [d.get('liquidity_health_1s', 0) for d in self.window_data if d.get('liquidity_health_1s', 0) > 0]
-        avg_liquidity_health_1m = np.mean(health_values) if health_values else 0
+        avg_liquidity_health_1m = np.mean(health_values) if health_values else 0.0
         
         # 9. Mid-Price (average over 1 minute)
         mid_prices = [d.get('mid_price_1s', 0) for d in self.window_data if d.get('mid_price_1s', 0) > 0]
-        avg_mid_price_1m = np.mean(mid_prices) if mid_prices else 0
+        avg_mid_price_1m = np.mean(mid_prices) if mid_prices else 0.0
         
         # 10. Best Bid/Ask (latest values)
-        latest_best_bid = latest_data.get('best_bid_1s', 0)
-        latest_best_ask = latest_data.get('best_ask_1s', 0)
+        latest_best_bid = latest_data.get('best_bid_1s', 0.0)
+        latest_best_ask = latest_data.get('best_ask_1s', 0.0)
         
         # 11. Volatility Regime Classification
         if volatility_1m < 0.1:
