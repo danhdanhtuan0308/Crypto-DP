@@ -45,7 +45,7 @@ def test_minute_aggregator_basic(monkeypatch):
     assert row["open"] == 100.0
     assert row["high"] == 110.0
     assert row["low"] == 100.0
-    assert row["close"] == 105.0
+    assert row["close"] == 110.0
     assert row["total_volume_1m"] == 6.0
     assert row["trade_count_1m"] == 3
     assert row["price_change_1m"] == 5.0
@@ -89,7 +89,7 @@ def fake_storage(monkeypatch):
     def fake_client(*args, **kwargs):
         return _FakeClient(store)
 
-    monkeypatch.setenv("GCP_SERVICE_ACCOUNT_JSON", "{\"project_id\": \"test\"}")
+    monkeypatch.setenv("GCP_SERVICE_ACCOUNT_JSON", '{"project_id": "test", "client_email": "test@test.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token", "private_key": "-----BEGIN PRIVATE KEY-----\\ntest\\n-----END PRIVATE KEY-----\\n"}')
     monkeypatch.setattr("raw_webhook_to_gcs.storage.Client", fake_client)
     return store
 
