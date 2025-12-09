@@ -250,7 +250,7 @@ def validate_gcs_data(**context):
 
 # Production DAG - runs entire ETL every hour
 with DAG(
-    'batch_etl_1hour_prod',
+    'batch_etl_5min_prod',
     default_args=default_args,
     description='Batch ETL: Collect 5 min data, aggregate, write to GCS',
     schedule_interval='*/5 * * * *',  # Every 5 minutes
