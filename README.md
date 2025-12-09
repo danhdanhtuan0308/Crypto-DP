@@ -68,14 +68,3 @@ cd data-pipeline-batch
 ./start-airflow.sh           # Start Airflow (http://localhost:8080)
 ```
 
-## Validation
-
-**Schema Parity Check**
-```bash
-python validate_schema_parity.py
-```
-Validates that Batch pipeline produces identical schema to Kafka pipeline:
-- ✅ All 37 columns present
-- ✅ All data types match (double for all metrics)
-- ✅ Sample data ranges verifiedtart-airflow.sh           # Start Airflow (http://localhost:8080)
-``` 
