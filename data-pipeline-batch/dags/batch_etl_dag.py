@@ -1,10 +1,10 @@
 """
-Airflow DAG: Batch Layer ETL - Run entire collection process every hour
+Airflow DAG: Batch Layer ETL - Run entire collection process every 5 minutes
 
-Triggered: Every hour at minute 0 (0 * * * *)
+Triggered: Every 5 minutes (*/5 * * * *)
 Process: 
-1. Collect 60 minutes of Coinbase data (1-min aggregation)
-2. Write 60 rows to GCS as Parquet
+1. Collect 5 minutes of Coinbase data (1-min aggregation)
+2. Write 5 rows to GCS as Parquet
 
 This DAG RUNS the ETL, not just triggers it.
 """
@@ -25,15 +25,15 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 3,
-    'retry_delay': timedelta(minutes=2),
-    'execution_timeout': timedelta(minutes=70),  # 60 min collection + 10 min buffer
+    'retry_delay': timedelta(minutes=1),
+    'execution_timeout': timedelta(minutes=15),  # 5 min collection + buffer
 }
 
 
 def collect_and_aggregate_data(**context):
     """
-    Collect 60 minutes of Coinbase data and aggregate into 1-min rows
-    This runs the ENTIRE ETL process for the past hour
+    Collect 5 minutes of Coinbase data and aggregate into 1-min rows
+    This runs the ENTIRE ETL process for the past 5 minutes
     """
     import json
     import asyncio
@@ -49,9 +49,9 @@ def collect_and_aggregate_data(**context):
     # Import the MinuteAggregator from raw_webhook_to_gcs
     from raw_webhook_to_gcs import MinuteAggregator, COINBASE_WS_URL, PRODUCT_ID
     
-    async def collect_for_duration(duration_minutes=60):
+    async def collect_for_duration(duration_minutes=5):
         """
-        Collect data for 60 minutes and aggregate into 1-min rows
+        Collect data for duration_minutes and aggregate into 1-min rows
         Uses MinuteAggregator - same ETL logic as kafka_1min_aggregator.py
         """
         aggregator = MinuteAggregator()
@@ -153,7 +153,7 @@ def collect_and_aggregate_data(**context):
         return aggregator.hourly_buffer
     
     # Run the collection
-    hourly_data = asyncio.run(collect_for_duration(60))
+    hourly_data = asyncio.run(collect_for_duration(5))
     
     # Store in XCom for next task
     context['task_instance'].xcom_push(key='hourly_data', value=hourly_data)
@@ -252,11 +252,11 @@ def validate_gcs_data(**context):
 with DAG(
     'batch_etl_1hour_prod',
     default_args=default_args,
-    description='Batch ETL: Collect 60 min data, aggregate, write to GCS',
-    schedule_interval='0 * * * *',  # Every hour at minute 0
+    description='Batch ETL: Collect 5 min data, aggregate, write to GCS',
+    schedule_interval='*/5 * * * *',  # Every 5 minutes
     start_date=days_ago(1),
     catchup=False,
-    tags=['batch', 'etl', 'production', '1hour'],
+    tags=['batch', 'etl', 'production', '5minute'],
 ) as dag:
     
     collect_task = PythonOperator(

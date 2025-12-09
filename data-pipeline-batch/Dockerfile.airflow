@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Copy the ETL code (needed by DAG)
 COPY raw_webhook_to_gcs.py /opt/airflow/
-COPY raw_webhook_to_gcs_test.py /opt/airflow/
 
 # Copy DAGs
 COPY dags /opt/airflow/dags
