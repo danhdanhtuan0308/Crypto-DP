@@ -3,3 +3,4 @@ pyarrow==14.0.2
 websockets==11.0.3
 numpy<2.0.0
 python-dotenv
+pytz
