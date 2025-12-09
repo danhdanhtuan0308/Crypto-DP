@@ -197,16 +197,26 @@ def validate_gcs_data(**context):
     logger = logging.getLogger(__name__)
     EASTERN = pytz.timezone('America/New_York')
     
-    # Get current hour in EST
-    now_est = datetime.now(EASTERN)
-    current_hour = now_est.replace(minute=0, second=0, microsecond=0)
+    # Get data from collect task to determine the actual hour written
+    ti = context['task_instance']
+    hourly_data = ti.xcom_pull(task_ids='collect_and_aggregate', key='hourly_data')
     
-    year = current_hour.strftime('%Y')
-    month = current_hour.strftime('%m')
-    day = current_hour.strftime('%d')
-    hour = current_hour.strftime('%H')
+    if not hourly_data or len(hourly_data) == 0:
+        raise Exception("No data to validate!")
+    
+    # Parse timestamp from first row (the hour that was actually written)
+    first_row = hourly_data[0]
+    window_start_est = datetime.strptime(first_row['window_start_est'], '%Y-%m-%d %H:%M:%S')
+    window_start_est = EASTERN.localize(window_start_est)
+    
+    year = window_start_est.strftime('%Y')
+    month = window_start_est.strftime('%m')
+    day = window_start_est.strftime('%d')
+    hour = window_start_est.strftime('%H')
     
     bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
+    
+    logger.info(f"🔍 Validating files for hour {hour}:00 EST (written data timestamp)")
     
     # Initialize GCS client
     creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
