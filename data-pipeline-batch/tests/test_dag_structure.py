@@ -1,7 +1,3 @@
-import pytest
-
-pytest.importorskip("airflow", reason="Airflow not installed in CI")
-
 from importlib import import_module
 
 
