@@ -57,6 +57,7 @@ class DashboardState(rx.State):
     
     # Auto-refresh state
     is_checking_for_new_data: bool = False
+    auto_refresh_enabled: bool = True
     
     # Chart data (stored as Plotly Figure objects for rx.plotly)
     price_chart_data: go.Figure = go.Figure()
@@ -70,13 +71,31 @@ class DashboardState(rx.State):
     micro_price_chart_data: go.Figure = go.Figure()
     
     async def on_load(self):
-        """Called when the page loads - load initial data only"""
+        """Called when the page loads - load initial data and start polling"""
         if self.last_full_reload == 0.0:
             self.last_full_reload = time.time()
         print(f"[on_load] Loading initial data at {datetime.now(EASTERN)}")
         
-        # Initial load only
+        # Initial load
         await self.load_data()
+        
+        # Start automatic polling
+        return DashboardState.start_auto_refresh
+    
+    async def start_auto_refresh(self):
+        """Background task that polls every 10 seconds"""
+        while self.auto_refresh_enabled:
+            await asyncio.sleep(10)
+            
+            should_load = False
+            async with self:
+                if not self.is_loading:
+                    print(f"[auto_refresh] Polling at {datetime.now(EASTERN).strftime('%H:%M:%S')}")
+                    should_load = True
+            
+            if should_load:
+                # Load data outside the lock to avoid blocking
+                await self.load_data()
     
     async def load_data(self):
         """Load data from GCS (background task)"""
