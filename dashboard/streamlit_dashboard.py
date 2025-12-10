@@ -68,7 +68,7 @@ st.session_state.selected_timeline = timeline_option
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
-PREFIX = 'year='  # Changed from 'btc_1min_agg/' to match your folder structure
+PREFIX = 'RealTime/year='  # Kafka pipeline writes to RealTime/ folder
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 def load_new_data_from_gcs(since_time=None, retry_count=0):
