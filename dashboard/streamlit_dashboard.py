@@ -68,7 +68,7 @@ st.session_state.selected_timeline = timeline_option
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
-PREFIX = 'RealTime/year='  # Kafka pipeline writes to RealTime/ folder
+PREFIX = 'RealTime/'  # Kafka pipeline writes to RealTime/ folder
 GCP_PROJECT_ID = 'crypto-dp'  # Add your GCP project ID
 
 def load_new_data_from_gcs(since_time=None, retry_count=0):
@@ -120,9 +120,9 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
                 since_time = pytz.UTC.localize(since_time)
             
             # Only check current hour + previous hour folders
-            current_hour_prefix = f"year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
+            current_hour_prefix = f"RealTime/year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
             prev_hour_est = now_est - timedelta(hours=1)
-            prev_hour_prefix = f"year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
+            prev_hour_prefix = f"RealTime/year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
             
             # List only current and previous hour (max ~120 files, typically just 1-2 new)
             current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
@@ -142,7 +142,7 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             # Load ONLY the specific hours we need (current hour + last 24 hours)
             for i in range(25):
                 hour_time = now_est - timedelta(hours=i)
-                hour_prefix = f"year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
+                hour_prefix = f"RealTime/year={hour_time.year}/month={hour_time.month:02d}/day={hour_time.day:02d}/hour={hour_time.hour:02d}/"
                 hour_blobs = list(bucket.list_blobs(prefix=hour_prefix, max_results=100))
                 blobs.extend(hour_blobs)
             
