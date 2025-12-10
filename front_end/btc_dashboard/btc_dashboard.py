@@ -10,10 +10,13 @@ from .components import sidebar, metrics_section, charts_section
 def index() -> rx.Component:
     """Main dashboard page"""
     return rx.fragment(
-        # Background polling handles data refresh, no need for page reload
+        # Auto-refresh every 10 seconds - simple and reliable
         rx.script("""
-            // Page ready - data will auto-update via background polling
-            console.log('Dashboard ready - background polling active for new data');
+            console.log('Auto-refresh setup: reloading every 10 seconds');
+            setInterval(function() {
+                console.log('[' + new Date().toLocaleTimeString() + '] Auto-reloading for new data');
+                window.location.reload();
+            }, 10000);
         """),
         
         rx.box(

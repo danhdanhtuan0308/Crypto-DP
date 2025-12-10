@@ -70,36 +70,13 @@ class DashboardState(rx.State):
     micro_price_chart_data: go.Figure = go.Figure()
     
     async def on_load(self):
-        """Called when the state is loaded - automatically load data like Streamlit"""
+        """Called when the page loads - load initial data only"""
         if self.last_full_reload == 0.0:
             self.last_full_reload = time.time()
-        # Automatically trigger data loading on every page load
+        print(f"[on_load] Loading initial data at {datetime.now(EASTERN)}")
+        
+        # Initial load only
         await self.load_data()
-        # Start background polling for new files
-        return DashboardState.check_for_new_data_background
-    
-    async def check_for_new_data_background(self):
-        """Background task that checks for new files every 10 seconds"""
-        while True:
-            await asyncio.sleep(10)  # Check every 10 seconds
-            
-            if self.is_loading or self.is_checking_for_new_data:
-                continue
-            
-            self.is_checking_for_new_data = True
-            
-            try:
-                if self.last_loaded_time is not None:
-                    data_loader = DataLoader()
-                    has_new_files = data_loader.check_for_new_files(self.last_loaded_time)
-                    
-                    if has_new_files:
-                        # New files detected - load them immediately
-                        await self.load_data()
-            except Exception as e:
-                print(f"Error checking for new data: {str(e)}")
-            finally:
-                self.is_checking_for_new_data = False
     
     async def load_data(self):
         """Load data from GCS (background task)"""
@@ -129,30 +106,40 @@ class DashboardState(rx.State):
                     self.last_loaded_time = None
                     self.last_full_reload = time.time()
                 else:
-                    # Incremental load - only get new minutes
+                    # Incremental load - only get new minutes since last load
+                    print(f"[load_data] Incremental load - checking since {self.last_loaded_time}")
                     new_df, error = data_loader.load_new_data_from_gcs(since_time=self.last_loaded_time)
                     
                     if error:
                         self.error_message = error
+                        print(f"[load_data] Error: {error}")
                     elif new_df is not None and not new_df.empty:
+                        print(f"[load_data] ✓ Found {len(new_df)} NEW minute(s) from GCS")
+                        
                         # Add new data to existing cache
                         df_full = pd.concat([self.cached_dataframe, new_df], ignore_index=True)
                         df_full = df_full.sort_values('window_start', ascending=True)
                         df_full = df_full.drop_duplicates(subset=['window_start'], keep='last')
                         
-                        # ROLLING WINDOW: Keep exactly the last 1440 minutes (24 hours)
-                        # When new minutes come in, oldest minutes are automatically dropped
-                        if len(df_full) > 1440:
-                            # Keep only the most recent 1440 minutes
-                            df_full = df_full.tail(1440).copy()
-                        else:
-                            # Also enforce time-based cutoff (24 hours)
-                            cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24)
-                            df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
+                        old_count = len(df_full)
                         
+                        # ROLLING WINDOW: Keep exactly 1440 minutes (1 day)
+                        # .tail(1440) keeps the NEWEST 1440 rows, dropping OLDEST ones
+                        if len(df_full) > 1440:
+                            oldest_before = df_full['window_start'].min()
+                            df_full = df_full.tail(1440).copy()
+                            oldest_after = df_full['window_start'].min()
+                            print(f"[load_data] ✓ Rolling window: {old_count} → {len(df_full)} minutes")
+                            print(f"[load_data]   Dropped oldest from {oldest_before} to {oldest_after}")
+                        
+                        # Update cache and timestamp
                         self.cached_dataframe = df_full
                         self.last_loaded_time = datetime.now(pytz.UTC)
-                        self.status_message = f"Rolling window: {len(df_full)} minutes"
+                        newest_time = df_full['window_start'].max()
+                        self.status_message = f"Updated: {len(df_full)} minutes (latest: {newest_time.strftime('%H:%M:%S')})"
+                        print(f"[load_data] ✓ Cache now has {len(df_full)} minutes (newest: {newest_time})")
+                    else:
+                        print(f"[load_data] No new files in GCS yet")
             
             # First load or forced reload
             if self.cached_dataframe is None:
