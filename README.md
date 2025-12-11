@@ -1,6 +1,6 @@
 # Crypto-DP
 
-Real-time BTC data pipeline: **Coinbase WebSocket → Kafka → GCS → Dashboard**
+Real-time BTC data pipeline: **Coinbase WebSocket → Kafka → GCS → Dashboard -> Real time AI analyzer**
 
 ## Architecture
 
@@ -19,8 +19,7 @@ Real-time BTC data pipeline: **Coinbase WebSocket → Kafka → GCS → Dashboar
 - Live BTC monitoring with OHLC charts, volume, volatility
 - Auto-refresh every 60 seconds
 
-## Deployment (Railway)
-
+## Deployment 
 Three services with separate Dockerfiles:
 
 **Service 1: Data Pipeline**
@@ -28,11 +27,10 @@ Three services with separate Dockerfiles:
 - Dockerfile: `data-pipeline/Dockerfile`
 - Runs: Producer + Aggregator + GCS Writer
 
-**Service 2: Batch Pipeline (Airflow)**
+**Service 2: Batch Pipeline (Airflow) - Local**
 - Root Directory: `data-pipeline-batch`
 - Dockerfile: `data-pipeline-batch/Dockerfile.airflow`
-- Runs: Airflow webserver + scheduler
-- Access: Railway generates public URL (login with AIRFLOW_USERNAME/AIRFLOW_PASSWORD)
+- Runs: ./docker.sh build then ./docker.sh start 
 
 **Service 3: Dashboard**
 - Root Directory: `dashboard`
@@ -55,16 +53,5 @@ GCP_SERVICE_ACCOUNT_JSON
 # Airflow (data-pipeline-batch service)
 AIRFLOW_USERNAME
 AIRFLOW_PASSWORD
-```
-## Local Development
 
-```bash
-pip install -r requirements.txt
-./start_pipeline_railway.sh  # Start pipeline
-./start_dashboard.sh         # Start dashboard
-
-# For batch layer
-cd data-pipeline-batch
-./start-airflow.sh           # Start Airflow (http://localhost:8080)
-```
 
