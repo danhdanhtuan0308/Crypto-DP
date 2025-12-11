@@ -19,6 +19,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Discord monitoring
+try:
+    from alerts import get_discord_alert, get_health_monitor
+    MONITORING_ENABLED = True
+except ImportError:
+    MONITORING_ENABLED = False
+    logger.warning("Discord monitoring not available")
+
 load_dotenv()
 
 # Eastern Time Zone - ALL timestamps will be in EST
@@ -639,6 +647,11 @@ def main():
         logger.error(f"Missing env vars: {', '.join(missing_vars)}")
         return
     
+    # Send startup alert
+    if MONITORING_ENABLED:
+        alert = get_discord_alert()
+        alert.producer_started(PRODUCT_ID)
+    
     retry_count = 0
     
     while True:  # Infinite retry - always try to reconnect
@@ -648,9 +661,15 @@ def main():
             asyncio.run(stream_coinbase_to_kafka())
         except websockets.exceptions.ConnectionClosed as e:
             logger.warning(f"Connection closed: {e}. Reconnecting in 5s...")
+            if MONITORING_ENABLED:
+                monitor = get_health_monitor()
+                monitor.report_producer_error(f"WebSocket closed: {str(e)}")
             time.sleep(5)
         except Exception as e:
             logger.error(f"Error: {e}. Reconnecting in 10s...")
+            if MONITORING_ENABLED:
+                monitor = get_health_monitor()
+                monitor.report_producer_error(str(e))
             time.sleep(10)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")

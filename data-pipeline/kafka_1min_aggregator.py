@@ -17,6 +17,13 @@ import logging
 import pytz
 import numpy as np
 
+# Discord monitoring
+try:
+    from alerts import get_discord_alert, get_health_monitor
+    MONITORING_ENABLED = True
+except ImportError:
+    MONITORING_ENABLED = False
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -279,6 +286,12 @@ def main():
     logger.info(f"Source: {SOURCE_TOPIC} (1 msg/sec)")
     logger.info(f"Output: {OUTPUT_TOPIC} (1 msg/min)")
     
+    # Send startup alert
+    if MONITORING_ENABLED:
+        alert = get_discord_alert()
+        alert.aggregator_started(SOURCE_TOPIC, OUTPUT_TOPIC)
+        monitor = get_health_monitor()
+    
     consumer = Consumer(CONSUMER_CONFIG)
     producer = Producer(PRODUCER_CONFIG)
     aggregator = MinuteAggregator()
@@ -322,6 +335,10 @@ def main():
             try:
                 data = json.loads(msg.value().decode('utf-8'))
                 
+                # Track message for monitoring
+                if MONITORING_ENABLED:
+                    monitor.track_consumer_message(SOURCE_TOPIC)
+                
                 # Add to aggregator
                 agg_msg = aggregator.add_tick(data)
                 
@@ -348,10 +365,18 @@ def main():
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse message: {e}")
+                if MONITORING_ENABLED:
+                    monitor.report_consumer_error(SOURCE_TOPIC, f"JSON decode error: {str(e)}")
                 continue
     
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        if MONITORING_ENABLED:
+            alert = get_discord_alert()
+            alert.aggregator_failed(str(e))
+        raise
     
     finally:
         consumer.close()

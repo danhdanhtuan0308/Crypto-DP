@@ -17,6 +17,13 @@ import logging
 import time
 import pytz
 
+# Discord monitoring
+try:
+    from alerts import get_discord_alert, get_health_monitor
+    MONITORING_ENABLED = True
+except ImportError:
+    MONITORING_ENABLED = False
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -196,12 +203,21 @@ def run_consumer():
             # Parse message
             try:
                 data = json.loads(msg.value().decode('utf-8'))
+                
+                # Track message for monitoring
+                if MONITORING_ENABLED:
+                    monitor = get_health_monitor()
+                    monitor.track_consumer_message(SOURCE_TOPIC)
+                
                 writer.add_record(data)
                 last_message_time = time.time()  # Update last message time
                 logger.debug(f"Added record to buffer (buffer size: {len(writer.buffer)})")
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse message: {e}")
+                if MONITORING_ENABLED:
+                    monitor = get_health_monitor()
+                    monitor.report_consumer_error(SOURCE_TOPIC, f"JSON decode error: {str(e)}")
                 continue
     
     except KeyboardInterrupt:
@@ -218,6 +234,11 @@ def run_consumer():
 
 def main():
     """Main entry point with infinite retry"""
+    # Send startup alert
+    if MONITORING_ENABLED:
+        alert = get_discord_alert()
+        alert.consumer_started(SOURCE_TOPIC, KAFKA_CONFIG['group.id'])
+    
     retry_count = 0
     
     while True:
@@ -227,6 +248,9 @@ def main():
             run_consumer()
         except Exception as e:
             logger.error(f"Error: {e}. Restarting in 10s...")
+            if MONITORING_ENABLED:
+                monitor = get_health_monitor()
+                monitor.report_consumer_error(SOURCE_TOPIC, str(e))
             time.sleep(10)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
