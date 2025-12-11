@@ -286,7 +286,7 @@ class MinuteAggregator:
         }
 
 
-def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
+def write_parquet_to_gcs(hourly_rows, bucket_name):
     """Write 60 rows of 1-minute data as Parquet to GCS (triggered by Airflow every hour)"""
     if not hourly_rows or len(hourly_rows) == 0:
         logger.warning("No data to write")
@@ -294,13 +294,25 @@ def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
     
     try:
         # Initialize GCS client with credentials from environment
+        # Support both JSON string and file path
         creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+        creds_path = os.getenv('GCS_CREDENTIALS_PATH')
+        
         if creds_json:
+            # JSON string from environment variable
             from google.oauth2 import service_account
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
+        elif creds_path:
+            # File path to credentials
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_file(creds_path)
+            with open(creds_path, 'r') as f:
+                creds_dict = json.load(f)
+            client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
         else:
+            # Fall back to default credentials
             client = storage.Client()
         
         bucket = client.bucket(bucket_name)
@@ -310,14 +322,15 @@ def write_parquet_to_gcs(hourly_rows: list, bucket_name: str):
         window_start_est = datetime.strptime(first_row['window_start_est'], '%Y-%m-%d %H:%M:%S')
         window_start_est = EASTERN.localize(window_start_est)
         
-        # Path: {year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet
+        # Path: Batch/{year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet
+        # Use Batch/ prefix to separate from RealTime/ data
         year = window_start_est.strftime('%Y')
         month = window_start_est.strftime('%m')
         day = window_start_est.strftime('%d')
         hour = window_start_est.strftime('%H')
         timestamp = datetime.now(EASTERN).strftime('%Y%m%d_%H%M%S')
         
-        blob_path = f"{year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet"
+        blob_path = f"Batch/{year}/{month}/{day}/btc_1h_{hour}_{timestamp}.parquet"
         
         # Convert list of dicts to PyArrow table (60 rows)
         table = pa.Table.from_pylist(hourly_rows)

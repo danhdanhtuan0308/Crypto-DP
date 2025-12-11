@@ -19,9 +19,6 @@ COPY raw_webhook_to_gcs.py /opt/airflow/
 # Copy DAGs
 COPY dags /opt/airflow/dags
 
-# Copy startup script and make it executable
-COPY --chown=airflow:root --chmod=755 start-airflow.sh /opt/airflow/
-
 WORKDIR /opt/airflow
 
 ENV PYTHONUNBUFFERED=1
@@ -29,6 +26,8 @@ ENV AIRFLOW_HOME=/opt/airflow
 ENV AIRFLOW__CORE__EXECUTOR=SequentialExecutor
 ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
 ENV AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+ENV AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+ENV AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT=False
 ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
 ENV AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
 ENV AIRFLOW__WEBSERVER__WORKERS=2
@@ -42,6 +41,13 @@ ENV GUNICORN_CMD_ARGS="--timeout 300 --graceful-timeout 300 --keep-alive 300"
 # Expose port 8080 for Airflow webserver
 EXPOSE 8080
 
-# Override the default entrypoint and use startup script
+# Expose port 8080 for Airflow webserver
+EXPOSE 8080
+
+# Startup script inline
 ENTRYPOINT []
-CMD ["bash", "/opt/airflow/start-airflow.sh"]
+CMD ["bash", "-c", "airflow db init && \
+     airflow users create --username ${AIRFLOW_USERNAME:-admin} --password ${AIRFLOW_PASSWORD:-admin} \
+     --firstname Admin --lastname User --role Admin --email admin@example.com || true && \
+     airflow scheduler & \
+     exec airflow webserver"]

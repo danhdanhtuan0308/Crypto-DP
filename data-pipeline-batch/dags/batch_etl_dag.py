@@ -214,24 +214,34 @@ def validate_gcs_data(**context):
     day = window_start_est.strftime('%d')
     hour = window_start_est.strftime('%H')
     
-    bucket_name = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
+    bucket_name = os.getenv('GCS_BUCKET', 'crypto-db-east1')
     
     logger.info(f"🔍 Validating files for hour {hour}:00 EST (written data timestamp)")
     
-    # Initialize GCS client
+    # Initialize GCS client with credentials (same logic as write_to_gcs)
     creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+    creds_path = os.getenv('GCS_CREDENTIALS_PATH')
+    
     if creds_json:
+        # JSON string from environment variable
         from google.oauth2 import service_account
         creds_dict = json.loads(creds_json)
         credentials = service_account.Credentials.from_service_account_info(creds_dict)
         storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
+    elif creds_path:
+        # File path to credentials
+        from google.oauth2 import service_account
+        credentials = service_account.Credentials.from_service_account_file(creds_path)
+        with open(creds_path, 'r') as f:
+            creds_dict = json.load(f)
+        storage_client = storage.Client(credentials=credentials, project=creds_dict.get('project_id'))
     else:
-        storage_client = storage.Client()
+        raise Exception("No GCS credentials found! Set GCP_SERVICE_ACCOUNT_JSON or GCS_CREDENTIALS_PATH")
     
     bucket = storage_client.bucket(bucket_name)
     
-    # List all files matching the hour pattern (with timestamp)
-    prefix = f"{year}/{month}/{day}/btc_1h_{hour}_"
+    # List all files matching the hour pattern (with timestamp) in Batch/ prefix
+    prefix = f"Batch/{year}/{month}/{day}/btc_1h_{hour}_"
     blobs = list(bucket.list_blobs(prefix=prefix))
     
     if not blobs:
