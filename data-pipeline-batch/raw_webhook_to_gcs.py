@@ -44,8 +44,8 @@ EASTERN = pytz.timezone('America/New_York')
 COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
 PRODUCT_ID = "BTC-USD"
 
-# GCS Configuration - Output to batch-btc-1h-east1 bucket (us-east1)
-GCS_BUCKET = os.getenv('GCS_BUCKET', 'batch-btc-1h-east1')
+# GCS Configuration - Output to crypto-db-east1 bucket (us-east1)
+GCS_BUCKET = os.getenv('GCS_BUCKET', 'crypto-db-east1')
 
 
 class MinuteAggregator:
@@ -464,7 +464,7 @@ def main():
     logger.info("BATCH LAYER: Coinbase WebSocket -> 1-Min Aggregation -> 60 rows/hour")
     logger.info("=" * 70)
     logger.info(f"Source: {COINBASE_WS_URL} ({PRODUCT_ID})")
-    logger.info(f"Output: gs://{GCS_BUCKET}/{{year}}/{{month}}/{{day}}/btc_1h_{{hour}}.parquet")
+    logger.info(f"Output: gs://{GCS_BUCKET}/Batch/{{year}}/{{month}}/{{day}}/btc_1h_{{hour}}.parquet")
     logger.info(f"Format: 1 Parquet file per hour with 60 rows (1 row = 1 minute)")
     logger.info(f"Features: Same as data-pipeline/kafka_1min_aggregator.py")
     logger.info(f"Orchestration: Airflow DAG (0 * * * *)")
