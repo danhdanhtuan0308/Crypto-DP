@@ -76,18 +76,19 @@ def _render_ai_fab() -> bool:
 <style>
 /* FAB button styling - target the Streamlit button directly */
 div[style*=\"position: fixed\"][style*=\"bottom: 30px\"] button {
-    width: 60px !important;
+    width: auto !important;
     height: 60px !important;
-    border-radius: 50% !important;
+    border-radius: 30px !important;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
     color: white !important;
-    font-size: 24px !important;
-    padding: 0 !important;
+    font-size: 16px !important;
+    padding: 0 20px !important;
     cursor: pointer !important;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
     border: none !important;
-    min-width: 60px !important;
+    min-width: auto !important;
     min-height: 60px !important;
+    white-space: nowrap !important;
 }
 div[style*=\"position: fixed\"][style*=\"bottom: 30px\"] button:hover {
     transform: scale(1.05) !important;
@@ -194,7 +195,7 @@ div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testi
 
     # Render button in fixed position container
     st.markdown('<div style="position: fixed; right: 30px; bottom: 30px; z-index: 99999;">', unsafe_allow_html=True)
-    clicked = st.button("💬", key="ai_fab_button")
+    clicked = st.button("💬 Ask Danziel-AI", key="ai_fab_button")
     st.markdown('</div>', unsafe_allow_html=True)
     return clicked
 
@@ -1188,7 +1189,7 @@ if st.session_state.ai_open:
             st.rerun()
         
         # Header
-        st.markdown("### 💬 AI Assistant")
+        st.markdown("### 💬 Danziel-AI")
         st.caption("Ask questions about BTC market data")
         st.markdown("---")
         
