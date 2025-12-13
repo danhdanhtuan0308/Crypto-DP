@@ -64,6 +64,16 @@ st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 
+# Auto-refresh: schedule the timed rerun early so it isn't delayed by long
+# dashboard rendering. Keep it paused while the AI panel is open.
+if not st.session_state.get("ai_open", False):
+    if st_autorefresh is not None:
+        st_autorefresh(interval=refresh_interval * 1000, key="dashboard_autorefresh")
+    else:
+        st.sidebar.warning(
+            "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
+        )
+
 # AI state
 if 'ai_open' not in st.session_state:
         st.session_state.ai_open = False
@@ -1154,17 +1164,9 @@ if df_full is not None and not df_full.empty:
     if st.session_state.cached_dataframe is not None:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
-    
-    # Auto-refresh: use a proper timer (no sleep/rerun loop).
+
     if st.session_state.ai_open:
         st.sidebar.info("Auto-refresh paused while AI is open")
-    else:
-        if st_autorefresh is not None:
-            st_autorefresh(interval=refresh_interval * 1000, key="dashboard_autorefresh")
-        else:
-            st.sidebar.warning(
-                "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
-            )
 
 else:
     st.error("No data available. Check GCS bucket.")
