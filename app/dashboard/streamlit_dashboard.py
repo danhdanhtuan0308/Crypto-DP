@@ -470,9 +470,12 @@ if st.session_state.cached_dataframe is not None:
             
             del st.session_state.cached_dataframe
             st.session_state.cached_dataframe = df_full
-            st.session_state.last_loaded_time = datetime.now(pytz.UTC)
         else:
+            # No new files found, but still use cached data
             df_full = st.session_state.cached_dataframe
+        
+        # Always update last_loaded_time so next refresh checks for newer files
+        st.session_state.last_loaded_time = datetime.now(pytz.UTC)
 
 # First load or forced reload
 if st.session_state.cached_dataframe is None:
