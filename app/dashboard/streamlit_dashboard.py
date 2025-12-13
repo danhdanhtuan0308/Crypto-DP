@@ -61,7 +61,7 @@ if 'last_full_reload' not in st.session_state:
 
 # Sidebar configuration
 st.sidebar.header("Settings")
-refresh_interval = 60  # Fixed 60 seconds refresh
+refresh_interval = 30  # seconds
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 st.sidebar.caption(f"Last render: {datetime.now(EASTERN).strftime('%H:%M:%S %Z')}")
 
@@ -348,8 +348,8 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
                 all_blobs.extend(blobs_in_hour)
             
             # Filter: get files created AFTER since_time (use >= to avoid missing edge cases)
-            # Add 2-minute lookback buffer to ensure we catch everything
-            since_time_with_buffer = since_time - timedelta(minutes=2)
+            # Add a wider lookback buffer to handle late-arriving minute files.
+            since_time_with_buffer = since_time - timedelta(minutes=10)
             blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) >= since_time_with_buffer]
 
             # Keep incremental refresh quiet; this runs every minute.
@@ -480,10 +480,9 @@ if st.session_state.cached_dataframe is not None:
         st.session_state.last_full_reload = time.time()
         df_full = None
     else:
-        # Use the timestamp of the LATEST data we have, not when we last tried to load
-        latest_data_time = st.session_state.cached_dataframe['window_start'].max()
-        # Convert to UTC for GCS comparison - look back 2 minutes to ensure we don't miss anything
-        check_after_time = latest_data_time.tz_convert(pytz.UTC).to_pydatetime() - timedelta(minutes=2)
+        # Always re-pull a small recent window to avoid missing newest minute files.
+        # This trades a tiny amount of extra IO for correctness.
+        check_after_time = datetime.now(pytz.UTC) - timedelta(minutes=10)
         
         # Debug info
         now_utc = datetime.now(pytz.UTC)
