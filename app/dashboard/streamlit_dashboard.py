@@ -316,21 +316,25 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             if since_time.tzinfo is None:
                 since_time = pytz.UTC.localize(since_time)
             
-            # Only check current hour + previous hour folders
-            current_hour_prefix = f"RealTime/year={now_est.year}/month={now_est.month:02d}/day={now_est.day:02d}/hour={now_est.hour:02d}/"
-            prev_hour_est = now_est - timedelta(hours=1)
-            prev_hour_prefix = f"RealTime/year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
+            # Check current hour + previous hour + next hour (to handle timezone edge cases)
+            hours_to_check = []
+            for offset in [-1, 0, 1]:
+                check_time = now_est + timedelta(hours=offset)
+                prefix = f"RealTime/year={check_time.year}/month={check_time.month:02d}/day={check_time.day:02d}/hour={check_time.hour:02d}/"
+                hours_to_check.append(prefix)
             
-            # List ALL blobs in these two hours (no max_results limit) so we never miss new files
-            current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix))
-            prev_hour_blobs = list(bucket.list_blobs(prefix=prev_hour_prefix))
-            all_blobs = current_hour_blobs + prev_hour_blobs
+            # List ALL blobs in these hours (no pagination limits)
+            all_blobs = []
+            for prefix in hours_to_check:
+                blobs_in_hour = list(bucket.list_blobs(prefix=prefix))
+                all_blobs.extend(blobs_in_hour)
             
-            # Filter to only files created AFTER since_time (with small buffer)
-            since_time_with_buffer = since_time - timedelta(seconds=60)
-            blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) > since_time_with_buffer]
+            # Filter: get files created AFTER since_time (use >= to avoid missing edge cases)
+            # Add 2-minute lookback buffer to ensure we catch everything
+            since_time_with_buffer = since_time - timedelta(minutes=2)
+            blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) >= since_time_with_buffer]
             
-            st.sidebar.info(f"Incremental: {len(blobs)} new files")
+            st.sidebar.info(f"Incremental: {len(blobs)} new files from last {int((datetime.now(pytz.UTC) - since_time).total_seconds())}s")
         
         # FULL LOAD: Load rolling 24 hours
         else:
@@ -457,7 +461,12 @@ if st.session_state.cached_dataframe is not None:
         st.session_state.last_loaded_time = None
         st.session_state.last_full_reload = time.time()
     else:
-        new_df = load_new_data_from_gcs(since_time=st.session_state.last_loaded_time)
+        # Use the timestamp of the LATEST data we have, not when we last tried to load
+        latest_data_time = st.session_state.cached_dataframe['window_start'].max()
+        # Convert to UTC for GCS comparison
+        check_after_time = latest_data_time.tz_convert(pytz.UTC).to_pydatetime() - timedelta(minutes=2)
+        
+        new_df = load_new_data_from_gcs(since_time=check_after_time)
         
         if new_df is not None and not new_df.empty:
             df_full = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
@@ -473,9 +482,6 @@ if st.session_state.cached_dataframe is not None:
         else:
             # No new files found, but still use cached data
             df_full = st.session_state.cached_dataframe
-        
-        # Always update last_loaded_time so next refresh checks for newer files
-        st.session_state.last_loaded_time = datetime.now(pytz.UTC)
 
 # First load or forced reload
 if st.session_state.cached_dataframe is None:
@@ -486,7 +492,6 @@ if st.session_state.cached_dataframe is None:
         df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
         
         st.session_state.cached_dataframe = df_full
-        st.session_state.last_loaded_time = datetime.now(pytz.UTC)
     else:
         df_full = None
 
