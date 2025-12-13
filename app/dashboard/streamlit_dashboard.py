@@ -1185,7 +1185,6 @@ if st.session_state.ai_open:
         # Close button (absolute positioned in top-right)
         if st.button("✕", key="ai_close_button"):
             st.session_state.ai_open = False
-            ai_container.empty()
             st.rerun()
         
         # Header
