@@ -1152,13 +1152,15 @@ if df_full is not None and not df_full.empty:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
     
-    # Auto-refresh (completely disabled while AI panel is open)
+    # Auto-refresh logic - only trigger timed refreshes when AI is closed
+    current_time = time.time()
+    time_since_refresh = current_time - st.session_state.last_refresh_time
+    
     if st.session_state.ai_open:
+        # AI is open - show paused message but DON'T do timed reruns
         st.sidebar.info("Auto-refresh paused while AI is open")
     else:
-        current_time = time.time()
-        time_since_refresh = current_time - st.session_state.last_refresh_time
-
+        # AI is closed - do timed auto-refresh
         if time_since_refresh >= refresh_interval:
             st.session_state.last_refresh_time = current_time
             time.sleep(0.1)
