@@ -12,6 +12,20 @@ from plotly.subplots import make_subplots
 import time
 from datetime import datetime, timedelta
 import pytz
+from pathlib import Path
+import urllib.parse
+
+# Local developer convenience: load env vars from .env if present
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    _here = Path(__file__).resolve().parent
+    load_dotenv(_here / ".env", override=False)
+    load_dotenv(_here.parents[1] / ".env", override=False)  # repo root
+except Exception:
+    pass
+
+from ai_assistant.chat import answer_with_deepseek
 
 # Page configuration
 st.set_page_config(
@@ -26,6 +40,9 @@ EASTERN = pytz.timezone('America/New_York')
 # Title
 st.title("Bitcoin Live Dashboard")
 st.caption("Real-time BTC data aggregated every minute")
+
+# Plotly rendering config (avoids deprecated st.plotly_chart kwargs)
+PLOTLY_CONFIG = {"responsive": True}
 
 # Initialize session state for timeline persistence and last refresh time
 if 'selected_timeline' not in st.session_state:
@@ -43,6 +60,143 @@ if 'last_full_reload' not in st.session_state:
 st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
+
+# AI state
+if 'ai_open' not in st.session_state:
+        st.session_state.ai_open = False
+if 'ai_messages' not in st.session_state:
+        st.session_state.ai_messages = []
+
+
+
+def _render_ai_fab() -> bool:
+    """Render a floating AI button that toggles the panel without navigating."""
+    st.markdown(
+        """
+<style>
+/* FAB button styling - target the Streamlit button directly */
+div[style*=\"position: fixed\"][style*=\"bottom: 30px\"] button {
+    width: 60px !important;
+    height: 60px !important;
+    border-radius: 50% !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    font-size: 24px !important;
+    padding: 0 !important;
+    cursor: pointer !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+    border: none !important;
+    min-width: 60px !important;
+    min-height: 60px !important;
+}
+div[style*=\"position: fixed\"][style*=\"bottom: 30px\"] button:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4) !important;
+}
+/* AI Panel overlay */
+/* Only target the SPECIFIC empty container, not parent blocks */
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) {
+    position: fixed !important;
+    right: 30px !important;
+    bottom: 110px !important;
+    width: 400px !important;
+    max-height: 550px !important;
+    background: white !important;
+    border-radius: 16px !important;
+    border: 1px solid #e0e0e0 !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12) !important;
+    z-index: 99998 !important;
+    overflow-y: auto !important;
+    padding: 0px !important;
+    padding-top: 45px !important; /* Space for close button */
+}
+/* Remove all default Streamlit padding/margins inside panel */
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) > div {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) .element-container {
+    padding: 10px !important;
+    margin: 0 !important;
+}
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) .stMarkdown {
+    padding: 0 10px !important;
+}
+/* Ensure form is visible */
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) form {
+    padding: 10px !important;
+    margin: 0 !important;
+    background: white !important;
+}
+/* Position close button in FIXED top-right corner of panel */
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testid="stButton"]:first-of-type {
+    position: fixed !important;
+    top: calc(100vh - 550px - 110px + 10px) !important; /* Match panel top + 10px */
+    right: 40px !important; /* Panel right (30px) + 10px padding */
+    width: 30px !important;
+    height: 30px !important;
+    z-index: 99999 !important;
+    margin: 0 !important;
+}
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testid="stButton"]:first-of-type button {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: rgba(0,0,0,0.1) !important;
+    color: #333 !important;
+    font-size: 18px !important;
+    line-height: 1 !important;
+    border: none !important;
+}
+div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testid="stButton"]:first-of-type button:hover {
+    background: rgba(0,0,0,0.2) !important;
+}
+/* Hide the marker itself */
+#ai-panel-marker {
+    display: none;
+}
+.ai-panel-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: white;
+}
+.ai-panel-header p {
+    margin: 4px 0 0 0;
+    font-size: 12px;
+    opacity: 0.9;
+}
+.ai-close-btn {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+.ai-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    background: #f8f9fa;
+}
+.ai-chat-input {
+    padding: 16px;
+    background: white;
+    border-top: 1px solid #e0e0e0;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+    # Render button in fixed position container
+    st.markdown('<div style="position: fixed; right: 30px; bottom: 30px; z-index: 99999;">', unsafe_allow_html=True)
+    clicked = st.button("💬", key="ai_fab_button")
+    st.markdown('</div>', unsafe_allow_html=True)
+    return clicked
 
 # Clear cache button
 if st.sidebar.button("Clear Cache"):
@@ -65,6 +219,11 @@ timeline_option = st.sidebar.radio(
 
 # Save selection to session state
 st.session_state.selected_timeline = timeline_option
+
+# Render floating AI button (always visible at top level)
+if _render_ai_fab():
+    st.session_state.ai_open = not st.session_state.ai_open
+    st.rerun()
 
 # GCS Configuration
 BUCKET_NAME = 'crypto-db-east1'
@@ -90,9 +249,16 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
         # Initialize client with credentials from environment or Streamlit secrets
         import os
         import json
+        from pathlib import Path
         
         # Try environment variable first (Railway, local)
-        creds_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+        creds_json = (
+            os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+            or os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        )
+
+        # Try a credentials file path (local/dev)
+        creds_path = os.getenv('GCS_CREDENTIALS_PATH') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         
         # Setup credentials
         if creds_json:
@@ -100,15 +266,32 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             creds_dict = json.loads(creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
-        elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+        elif creds_path and Path(creds_path).exists():
             from google.oauth2 import service_account
-            credentials = service_account.Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"]
-            )
+
+            credentials = service_account.Credentials.from_service_account_file(creds_path)
             client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
         else:
-            st.error("GCP credentials not found. Set GCP_SERVICE_ACCOUNT_JSON environment variable.")
-            client = storage.Client(project=GCP_PROJECT_ID)
+            # Streamlit secrets are optional; accessing st.secrets can throw if no secrets.toml exists
+            secrets_dict = {}
+            try:
+                secrets_dict = dict(getattr(st, "secrets", {}) or {})
+            except Exception:
+                secrets_dict = {}
+
+            if 'gcp_service_account' in secrets_dict:
+                from google.oauth2 import service_account
+
+                credentials = service_account.Credentials.from_service_account_info(
+                    secrets_dict["gcp_service_account"]
+                )
+                client = storage.Client(credentials=credentials, project=GCP_PROJECT_ID)
+            else:
+                st.error(
+                    "GCP credentials not found. Set `GCP_SERVICE_ACCOUNT_JSON` (recommended) "
+                    "or `GCS_CREDENTIALS_PATH` / `GOOGLE_APPLICATION_CREDENTIALS`."
+                )
+                client = storage.Client(project=GCP_PROJECT_ID)
         
         bucket = client.bucket(BUCKET_NAME)
         now_est = datetime.now(EASTERN)
@@ -216,6 +399,27 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
         else:
             st.error("Max retries reached. Check GCS connection.")
             return None
+
+
+def refresh_cached_data_from_gcs_for_ai() -> None:
+    """Ensure the in-memory dataframe includes the newest 1-minute files from GCS."""
+    if st.session_state.cached_dataframe is None:
+        return
+
+    new_df = load_new_data_from_gcs(since_time=st.session_state.last_loaded_time)
+    if new_df is None or new_df.empty:
+        return
+
+    df_full_local = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
+    df_full_local = df_full_local.sort_values('window_start', ascending=True)
+    df_full_local = df_full_local.drop_duplicates(subset=['window_start'], keep='last')
+
+    cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
+    df_full_local = df_full_local[df_full_local['window_start'] >= cutoff_24h].copy()
+
+    del st.session_state.cached_dataframe
+    st.session_state.cached_dataframe = df_full_local
+    st.session_state.last_loaded_time = datetime.now(pytz.UTC)
 
 # Smart incremental loading logic with periodic full reload
 load_start = time.time()
@@ -441,7 +645,7 @@ if df_full is not None and not df_full.empty:
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig_price, width='stretch')
+    st.plotly_chart(fig_price, config=PLOTLY_CONFIG)
     
     # Chart 2: Volume Analysis
     st.subheader("📊 Volume Analysis")
@@ -474,7 +678,7 @@ if df_full is not None and not df_full.empty:
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=1, col=1)
     fig_volume.update_yaxes(title_text="Volume (BTC)", row=2, col=1)
     
-    st.plotly_chart(fig_volume, width='stretch')
+    st.plotly_chart(fig_volume, config=PLOTLY_CONFIG)
     
     # Chart 3: Advanced Metrics
     st.subheader("🔬 Advanced Metrics")
@@ -519,7 +723,7 @@ if df_full is not None and not df_full.empty:
     fig_metrics.update_yaxes(title_text="Volatility", row=1, col=1)
     fig_metrics.update_yaxes(title_text="Ratio", row=2, col=1)
     
-    st.plotly_chart(fig_metrics, width='stretch')
+    st.plotly_chart(fig_metrics, config=PLOTLY_CONFIG)
     
     # Chart 4: Trade Count Analysis
     st.subheader("📊 Trade Count Analysis")
@@ -559,7 +763,7 @@ if df_full is not None and not df_full.empty:
             showlegend=True
         )
         
-        st.plotly_chart(fig_trades, width='stretch')
+        st.plotly_chart(fig_trades, config=PLOTLY_CONFIG)
     else:
         st.info("Trade count data not available in the current dataset")
     
@@ -618,7 +822,7 @@ if df_full is not None and not df_full.empty:
     fig_spread_depth.update_yaxes(title_text="Spread ($)", row=1, col=1)
     fig_spread_depth.update_yaxes(title_text="Depth (BTC)", row=2, col=1)
     
-    st.plotly_chart(fig_spread_depth, width='stretch')
+    st.plotly_chart(fig_spread_depth, config=PLOTLY_CONFIG)
     
     # Chart 6: Price Metrics - VWAP, Mid-Price, Close
     st.subheader("💰 Price Comparison: VWAP vs Mid-Price vs Close")
@@ -665,7 +869,7 @@ if df_full is not None and not df_full.empty:
         showlegend=True
     )
     
-    st.plotly_chart(fig_prices, width='stretch')
+    st.plotly_chart(fig_prices, config=PLOTLY_CONFIG)
     
     # Chart 7: CVD & OFI (Order Flow)
     st.subheader("🌊 Order Flow: CVD & OFI")
@@ -710,7 +914,7 @@ if df_full is not None and not df_full.empty:
     fig_flow.update_yaxes(title_text="CVD (BTC)", row=1, col=1)
     fig_flow.update_yaxes(title_text="OFI", row=2, col=1)
     
-    st.plotly_chart(fig_flow, width='stretch')
+    st.plotly_chart(fig_flow, config=PLOTLY_CONFIG)
     
     # Chart 8: Market Quality - Kyle's Lambda & Liquidity Health
     st.subheader("🏥 Market Quality: Price Impact & Liquidity")
@@ -757,7 +961,7 @@ if df_full is not None and not df_full.empty:
     fig_quality.update_yaxes(title_text="Lambda ($/BTC)", row=1, col=1)
     fig_quality.update_yaxes(title_text="Health (BTC)", row=2, col=1)
     
-    st.plotly_chart(fig_quality, width='stretch')
+    st.plotly_chart(fig_quality, config=PLOTLY_CONFIG)
     
     # Chart 9: Micro-Price Deviation
     st.subheader("🎯 Micro-Price Deviation")
@@ -784,7 +988,7 @@ if df_full is not None and not df_full.empty:
         showlegend=True
     )
     
-    st.plotly_chart(fig_micro, width='stretch')
+    st.plotly_chart(fig_micro, config=PLOTLY_CONFIG)
     
     # Data Table
     st.subheader("📋 Recent Data")
@@ -805,7 +1009,7 @@ if df_full is not None and not df_full.empty:
         'price_change_percent_1m': 'Change %'
     })
     
-    st.dataframe(display_df.iloc[::-1], width='stretch')
+    st.dataframe(display_df.iloc[::-1])
     
     # Statistics section with clear separator
     st.markdown("---")
@@ -947,20 +1151,97 @@ if df_full is not None and not df_full.empty:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
     
-    current_time = time.time()
-    time_since_refresh = current_time - st.session_state.last_refresh_time
-    
-    if time_since_refresh >= refresh_interval:
-        st.session_state.last_refresh_time = current_time
-        time.sleep(0.1)
-        st.rerun()
+    # Auto-refresh (pause while AI panel is open to avoid interrupting text input)
+    if not st.session_state.ai_open:
+        current_time = time.time()
+        time_since_refresh = current_time - st.session_state.last_refresh_time
+
+        if time_since_refresh >= refresh_interval:
+            st.session_state.last_refresh_time = current_time
+            time.sleep(0.1)
+            st.rerun()
+        else:
+            remaining = int(refresh_interval - time_since_refresh)
+            st.sidebar.text(f"Refresh in: {remaining}s")
+            time.sleep(1)
+            st.rerun()
     else:
-        remaining = int(refresh_interval - time_since_refresh)
-        st.sidebar.text(f"Refresh in: {remaining}s")
-        time.sleep(1)
-        st.rerun()
+        st.sidebar.info("Auto-refresh paused while AI is open")
 
 else:
     st.error("No data available. Check GCS bucket.")
     if st.button("Retry"):
         st.rerun()
+
+# Render AI panel AFTER all dashboard content
+if st.session_state.ai_open:
+    # Use empty() to create a placeholder that we can style with CSS
+    ai_container = st.empty()
+    
+    with ai_container.container():
+        st.markdown('<div id="ai-panel-marker"></div>', unsafe_allow_html=True)
+        
+        # Close button (absolute positioned in top-right)
+        if st.button("✕", key="ai_close_button"):
+            st.session_state.ai_open = False
+            ai_container.empty()
+            st.rerun()
+        
+        # Header
+        st.markdown("### 💬 AI Assistant")
+        st.caption("Ask questions about BTC market data")
+        st.markdown("---")
+        
+        # Messages
+        if len(st.session_state.ai_messages) == 0:
+            st.info("Hi! I can help you analyze the current BTC market data. Ask me anything about prices, volumes, volatility, or order flow!")
+        else:
+            # Show chat history in a scrollable area
+            for i, msg in enumerate(st.session_state.ai_messages):
+                role = msg.get("role", "assistant")
+                content = msg.get("content", "")
+                if role == "user":
+                    st.markdown(f"**You:** {content}")
+                else:
+                    st.markdown(f"**AI:** {content}")
+                    st.markdown("")  # Add spacing between messages
+        
+        # Input
+        with st.form("ai_chat_form", clear_on_submit=True):
+            user_q = st.text_input("Type your question...", value="", label_visibility="collapsed")
+            submitted = st.form_submit_button("Send", use_container_width=True)
+
+        if submitted and user_q.strip():
+            # Add user message immediately
+            st.session_state.ai_messages.append({"role": "user", "content": user_q.strip()})
+            
+            # Add a "thinking" placeholder
+            st.session_state.ai_messages.append({"role": "assistant", "content": "🤔 Thinking..."})
+            st.rerun()
+
+        # Check if last message is "thinking" - if so, get the actual response
+        if (len(st.session_state.ai_messages) > 0 and 
+            st.session_state.ai_messages[-1].get("content") == "🤔 Thinking..."):
+            
+            # Get the user's question (second to last message)
+            user_question = st.session_state.ai_messages[-2].get("content", "")
+            
+            # Show spinner while getting response
+            with st.spinner("AI is responding..."):
+                refresh_cached_data_from_gcs_for_ai()
+                df_for_ai = st.session_state.cached_dataframe
+                
+                if df_for_ai is not None:
+                    now_est = datetime.now(EASTERN)
+                    answer = answer_with_deepseek(
+                        question=user_question,
+                        df_full=df_for_ai,
+                        timeline_label=st.session_state.selected_timeline,
+                        now_est=now_est,
+                    )
+                    # Replace "thinking" message with actual response
+                    st.session_state.ai_messages[-1] = {"role": "assistant", "content": answer}
+                else:
+                    st.session_state.ai_messages[-1] = {"role": "assistant", "content": "Sorry, no data available to answer your question."}
+            
+            st.rerun()
