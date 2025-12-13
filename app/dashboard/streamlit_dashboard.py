@@ -68,7 +68,12 @@ st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 # dashboard rendering. Keep it paused while the AI panel is open.
 if not st.session_state.get("ai_open", False):
     if st_autorefresh is not None:
-        st_autorefresh(interval=refresh_interval * 1000, key="dashboard_autorefresh")
+        st_autorefresh(
+            interval=refresh_interval * 1000,
+            limit=None,
+            debounce=False,
+            key="dashboard_autorefresh",
+        )
     else:
         st.sidebar.warning(
             "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
@@ -333,8 +338,8 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             # Add 2-minute lookback buffer to ensure we catch everything
             since_time_with_buffer = since_time - timedelta(minutes=2)
             blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) >= since_time_with_buffer]
-            
-            st.sidebar.info(f"Incremental: {len(blobs)} new files from last {int((datetime.now(pytz.UTC) - since_time).total_seconds())}s")
+
+            # Keep incremental refresh quiet; this runs every minute.
         
         # FULL LOAD: Load rolling 24 hours
         else:
@@ -469,7 +474,6 @@ if st.session_state.cached_dataframe is not None:
         
         # Debug info
         now_utc = datetime.now(pytz.UTC)
-        st.sidebar.text(f"Checking GCS since: {check_after_time.strftime('%H:%M:%S')}")
         
         new_df = load_new_data_from_gcs(since_time=check_after_time)
         
@@ -486,11 +490,15 @@ if st.session_state.cached_dataframe is not None:
             # Update cache
             del st.session_state.cached_dataframe
             st.session_state.cached_dataframe = df_full
-            st.sidebar.success(f"✓ Loaded {len(new_df)} new records")
+            try:
+                st.session_state.last_loaded_time = (
+                    st.session_state.cached_dataframe['window_start'].max().tz_convert(pytz.UTC).to_pydatetime()
+                )
+            except Exception:
+                pass
         else:
             # No new files found - use cached data
             df_full = st.session_state.cached_dataframe
-            st.sidebar.warning("No new data found")
 
 # First load or forced reload
 if st.session_state.cached_dataframe is None:
@@ -501,6 +509,12 @@ if st.session_state.cached_dataframe is None:
         df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
         
         st.session_state.cached_dataframe = df_full
+        try:
+            st.session_state.last_loaded_time = (
+                st.session_state.cached_dataframe['window_start'].max().tz_convert(pytz.UTC).to_pydatetime()
+            )
+        except Exception:
+            pass
     else:
         df_full = None
 
