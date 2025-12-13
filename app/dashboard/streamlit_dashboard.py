@@ -321,9 +321,9 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             prev_hour_est = now_est - timedelta(hours=1)
             prev_hour_prefix = f"RealTime/year={prev_hour_est.year}/month={prev_hour_est.month:02d}/day={prev_hour_est.day:02d}/hour={prev_hour_est.hour:02d}/"
             
-            # List only current and previous hour (max ~120 files, typically just 1-2 new)
-            current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix, max_results=100))
-            prev_hour_blobs = list(bucket.list_blobs(prefix=prev_hour_prefix, max_results=100))
+            # List ALL blobs in these two hours (no max_results limit) so we never miss new files
+            current_hour_blobs = list(bucket.list_blobs(prefix=current_hour_prefix))
+            prev_hour_blobs = list(bucket.list_blobs(prefix=prev_hour_prefix))
             all_blobs = current_hour_blobs + prev_hour_blobs
             
             # Filter to only files created AFTER since_time (with small buffer)
