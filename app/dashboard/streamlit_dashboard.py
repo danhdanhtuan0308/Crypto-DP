@@ -61,24 +61,17 @@ if 'last_full_reload' not in st.session_state:
 
 # Sidebar configuration
 st.sidebar.header("Settings")
-refresh_interval = 20  # seconds
+refresh_interval = 15  # seconds
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 st.sidebar.caption(f"Last render: {datetime.now(EASTERN).strftime('%H:%M:%S %Z')}")
 
-# Auto-refresh: schedule the timed rerun early so it isn't delayed by long
-# dashboard rendering. Keep it paused while the AI panel is open.
-if not st.session_state.get("ai_open", False):
-    if st_autorefresh is not None:
-        st_autorefresh(
-            interval=refresh_interval * 1000,
-            limit=None,
-            debounce=False,
-            key="dashboard_autorefresh",
-        )
-    else:
-        st.sidebar.warning(
-            "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
-        )
+# Don't start the auto-refresh timer until AFTER the first dataset is loaded.
+# Starting it before the first load can cause a rerun loop that prevents the
+# dashboard from ever finishing initialization.
+if st_autorefresh is None:
+    st.sidebar.warning(
+        "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
+    )
 
 # AI state
 if 'ai_open' not in st.session_state:
@@ -348,8 +341,8 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
                 all_blobs.extend(blobs_in_hour)
             
             # Filter: get files created AFTER since_time (use >= to avoid missing edge cases)
-            # Add a wider lookback buffer to handle late-arriving minute files.
-            since_time_with_buffer = since_time - timedelta(minutes=10)
+            # Add a small lookback buffer to handle late-arriving minute files.
+            since_time_with_buffer = since_time - timedelta(minutes=5)
             blobs = [b for b in all_blobs if b.time_created.replace(tzinfo=pytz.UTC) >= since_time_with_buffer]
 
             # Keep incremental refresh quiet; this runs every minute.
@@ -482,7 +475,7 @@ if st.session_state.cached_dataframe is not None:
     else:
         # Always re-pull a small recent window to avoid missing newest minute files.
         # This trades a tiny amount of extra IO for correctness.
-        check_after_time = datetime.now(pytz.UTC) - timedelta(minutes=10)
+        check_after_time = datetime.now(pytz.UTC) - timedelta(minutes=5)
         
         # Debug info
         now_utc = datetime.now(pytz.UTC)
@@ -538,6 +531,17 @@ if st.session_state.cached_dataframe is None:
         df_full = None
 
 if df_full is not None and not df_full.empty:
+    # Start the timed rerun only after we have data (prevents startup rerun loops).
+    # Keep it paused while the AI panel is open.
+    if not st.session_state.get("ai_open", False):
+        if st_autorefresh is not None:
+            st_autorefresh(
+                interval=refresh_interval * 1000,
+                limit=None,
+                debounce=True,
+                key="dashboard_autorefresh",
+            )
+
     # Filter data by selected timeframe - ALL IN EASTERN TIME
     now_est = datetime.now(EASTERN)  # Keep timezone aware
     
