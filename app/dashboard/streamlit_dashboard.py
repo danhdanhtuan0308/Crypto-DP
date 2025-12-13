@@ -1182,10 +1182,11 @@ if st.session_state.ai_open:
     with ai_container.container():
         st.markdown('<div id="ai-panel-marker"></div>', unsafe_allow_html=True)
         
-        # Close button (absolute positioned in top-right)
-        if st.button("✕", key="ai_close_button"):
+        # Close button with callback to avoid blur
+        def close_ai_panel():
             st.session_state.ai_open = False
-            st.rerun()
+        
+        st.button("✕", key="ai_close_button", on_click=close_ai_panel)
         
         # Header
         st.markdown("### 💬 Danziel-AI")
