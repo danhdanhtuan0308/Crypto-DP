@@ -1152,8 +1152,10 @@ if df_full is not None and not df_full.empty:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
     
-    # Auto-refresh (pause while AI panel is open to avoid interrupting text input)
-    if not st.session_state.ai_open:
+    # Auto-refresh (completely disabled while AI panel is open)
+    if st.session_state.ai_open:
+        st.sidebar.info("Auto-refresh paused while AI is open")
+    else:
         current_time = time.time()
         time_since_refresh = current_time - st.session_state.last_refresh_time
 
@@ -1166,8 +1168,6 @@ if df_full is not None and not df_full.empty:
             st.sidebar.text(f"Refresh in: {remaining}s")
             time.sleep(1)
             st.rerun()
-    else:
-        st.sidebar.info("Auto-refresh paused while AI is open")
 
 else:
     st.error("No data available. Check GCS bucket.")
