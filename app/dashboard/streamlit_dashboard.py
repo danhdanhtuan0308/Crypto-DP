@@ -15,6 +15,11 @@ import pytz
 from pathlib import Path
 import urllib.parse
 
+try:
+    from streamlit_autorefresh import st_autorefresh  # type: ignore
+except Exception:
+    st_autorefresh = None  # type: ignore
+
 # Local developer convenience: load env vars from .env if present
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -47,8 +52,6 @@ PLOTLY_CONFIG = {"responsive": True}
 # Initialize session state for timeline persistence and last refresh time
 if 'selected_timeline' not in st.session_state:
     st.session_state.selected_timeline = "1 Day"
-if 'last_refresh_time' not in st.session_state:
-    st.session_state.last_refresh_time = time.time()
 if 'cached_dataframe' not in st.session_state:
     st.session_state.cached_dataframe = None
 if 'last_loaded_time' not in st.session_state:
@@ -136,7 +139,7 @@ div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testi
     right: 40px !important; /* Panel right (30px) + 10px padding */
     width: 30px !important;
     height: 30px !important;
-    z-index: 99999 !important;
+    z-index: 100000 !important;
     margin: 0 !important;
 }
 div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testid="stButton"]:first-of-type button {
@@ -194,7 +197,7 @@ div[data-testid="stVerticalBlock"] > div > div:has(#ai-panel-marker) [data-testi
     )
 
     # Render button in fixed position container
-    st.markdown('<div style="position: fixed; right: 30px; bottom: 30px; z-index: 99999;">', unsafe_allow_html=True)
+    st.markdown('<div style="position: fixed; right: 30px; bottom: 30px; z-index: 99990;">', unsafe_allow_html=True)
     clicked = st.button("💬 Ask Danziel-AI", key="ai_fab_button")
     st.markdown('</div>', unsafe_allow_html=True)
     return clicked
@@ -1152,24 +1155,16 @@ if df_full is not None and not df_full.empty:
         mem_mb = st.session_state.cached_dataframe.memory_usage(deep=True).sum() / (1024 * 1024)
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
     
-    # Auto-refresh logic - only trigger timed refreshes when AI is closed
-    current_time = time.time()
-    time_since_refresh = current_time - st.session_state.last_refresh_time
-    
+    # Auto-refresh: use a proper timer (no sleep/rerun loop).
     if st.session_state.ai_open:
-        # AI is open - show paused message but DON'T do timed reruns
         st.sidebar.info("Auto-refresh paused while AI is open")
     else:
-        # AI is closed - do timed auto-refresh
-        if time_since_refresh >= refresh_interval:
-            st.session_state.last_refresh_time = current_time
-            time.sleep(0.1)
-            st.rerun()
+        if st_autorefresh is not None:
+            st_autorefresh(interval=refresh_interval * 1000, key="dashboard_autorefresh")
         else:
-            remaining = int(refresh_interval - time_since_refresh)
-            st.sidebar.text(f"Refresh in: {remaining}s")
-            time.sleep(1)
-            st.rerun()
+            st.sidebar.warning(
+                "Auto-refresh helper missing. Add `streamlit-autorefresh` to requirements to enable timed refresh."
+            )
 
 else:
     st.error("No data available. Check GCS bucket.")
