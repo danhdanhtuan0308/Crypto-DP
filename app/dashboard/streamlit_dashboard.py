@@ -460,15 +460,21 @@ if st.session_state.cached_dataframe is not None:
         st.session_state.cached_dataframe = None
         st.session_state.last_loaded_time = None
         st.session_state.last_full_reload = time.time()
+        df_full = None
     else:
         # Use the timestamp of the LATEST data we have, not when we last tried to load
         latest_data_time = st.session_state.cached_dataframe['window_start'].max()
-        # Convert to UTC for GCS comparison
+        # Convert to UTC for GCS comparison - look back 2 minutes to ensure we don't miss anything
         check_after_time = latest_data_time.tz_convert(pytz.UTC).to_pydatetime() - timedelta(minutes=2)
+        
+        # Debug info
+        now_utc = datetime.now(pytz.UTC)
+        st.sidebar.text(f"Checking GCS since: {check_after_time.strftime('%H:%M:%S')}")
         
         new_df = load_new_data_from_gcs(since_time=check_after_time)
         
         if new_df is not None and not new_df.empty:
+            # Found new data - merge it
             df_full = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
             df_full = df_full.sort_values('window_start', ascending=True)
             df_full = df_full.drop_duplicates(subset=['window_start'], keep='last')
@@ -477,11 +483,14 @@ if st.session_state.cached_dataframe is not None:
             cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
             df_full = df_full[df_full['window_start'] >= cutoff_24h].copy()
             
+            # Update cache
             del st.session_state.cached_dataframe
             st.session_state.cached_dataframe = df_full
+            st.sidebar.success(f"✓ Loaded {len(new_df)} new records")
         else:
-            # No new files found, but still use cached data
+            # No new files found - use cached data
             df_full = st.session_state.cached_dataframe
+            st.sidebar.warning("No new data found")
 
 # First load or forced reload
 if st.session_state.cached_dataframe is None:
