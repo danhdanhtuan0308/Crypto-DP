@@ -63,6 +63,7 @@ if 'last_full_reload' not in st.session_state:
 st.sidebar.header("Settings")
 refresh_interval = 60  # Fixed 60 seconds refresh
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
+st.sidebar.caption(f"Last render: {datetime.now(EASTERN).strftime('%H:%M:%S %Z')}")
 
 # Auto-refresh: schedule the timed rerun early so it isn't delayed by long
 # dashboard rendering. Keep it paused while the AI panel is open.
@@ -321,16 +322,28 @@ def load_new_data_from_gcs(since_time=None, retry_count=0):
             if since_time.tzinfo is None:
                 since_time = pytz.UTC.localize(since_time)
             
-            # Check current hour + previous hour + next hour (to handle timezone edge cases)
-            hours_to_check = []
-            for offset in [-1, 0, 1]:
-                check_time = now_est + timedelta(hours=offset)
-                prefix = f"RealTime/year={check_time.year}/month={check_time.month:02d}/day={check_time.day:02d}/hour={check_time.hour:02d}/"
-                hours_to_check.append(prefix)
+            # Check hour partitions around BOTH now and the since_time anchor.
+            # This avoids missing new files if the newest blob lands in an adjacent hour
+            # relative to the chosen anchor.
+            ref_times_est = [now_est]
+            try:
+                ref_times_est.append(since_time.astimezone(EASTERN))
+            except Exception:
+                pass
+
+            hours_to_check = set()
+            for ref_time in ref_times_est:
+                for offset in [-1, 0, 1]:
+                    check_time = ref_time + timedelta(hours=offset)
+                    prefix = (
+                        f"RealTime/year={check_time.year}/month={check_time.month:02d}/"
+                        f"day={check_time.day:02d}/hour={check_time.hour:02d}/"
+                    )
+                    hours_to_check.add(prefix)
             
             # List ALL blobs in these hours (no pagination limits)
             all_blobs = []
-            for prefix in hours_to_check:
+            for prefix in sorted(hours_to_check):
                 blobs_in_hour = list(bucket.list_blobs(prefix=prefix))
                 all_blobs.extend(blobs_in_hour)
             
@@ -479,9 +492,16 @@ if st.session_state.cached_dataframe is not None:
         
         if new_df is not None and not new_df.empty:
             # Found new data - merge it
-            df_full = pd.concat([st.session_state.cached_dataframe, new_df], ignore_index=True)
+            cached_part = st.session_state.cached_dataframe.copy()
+            new_part = new_df.copy()
+            cached_part["_src"] = 0
+            new_part["_src"] = 1
+            df_full = pd.concat([cached_part, new_part], ignore_index=True)
             df_full = df_full.sort_values('window_start', ascending=True)
+            # Ensure new rows win for duplicate timestamps.
+            df_full = df_full.sort_values(['window_start', '_src'], ascending=True)
             df_full = df_full.drop_duplicates(subset=['window_start'], keep='last')
+            df_full = df_full.drop(columns=['_src'])
             
             # Keep only last 24 hours
             cutoff_24h = datetime.now(EASTERN) - timedelta(hours=24, minutes=30)
