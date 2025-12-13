@@ -532,15 +532,17 @@ if st.session_state.cached_dataframe is None:
 
 if df_full is not None and not df_full.empty:
     # Start the timed rerun only after we have data (prevents startup rerun loops).
-    # Keep it paused while the AI panel is open.
-    if not st.session_state.get("ai_open", False):
-        if st_autorefresh is not None:
-            st_autorefresh(
-                interval=refresh_interval * 1000,
-                limit=None,
-                debounce=True,
-                key="dashboard_autorefresh",
-            )
+    # Keep refreshing even while the AI panel is open; use a slower interval then
+    # to avoid disrupting chat interactions.
+    if st_autorefresh is not None:
+        ai_open = bool(st.session_state.get("ai_open", False))
+        effective_refresh_interval = refresh_interval if not ai_open else max(refresh_interval, 30)
+        st_autorefresh(
+            interval=effective_refresh_interval * 1000,
+            limit=None,
+            debounce=True,
+            key="dashboard_autorefresh",
+        )
 
     # Filter data by selected timeframe - ALL IN EASTERN TIME
     now_est = datetime.now(EASTERN)  # Keep timezone aware
@@ -1220,7 +1222,7 @@ if df_full is not None and not df_full.empty:
         st.sidebar.text(f"Memory: {mem_mb:.1f}MB")
 
     if st.session_state.ai_open:
-        st.sidebar.info("Auto-refresh paused while AI is open")
+        st.sidebar.info("Auto-refresh continues while AI is open")
 
 else:
     st.error("No data available. Check GCS bucket.")
