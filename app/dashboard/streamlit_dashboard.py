@@ -61,7 +61,7 @@ if 'last_full_reload' not in st.session_state:
 
 # Sidebar configuration
 st.sidebar.header("Settings")
-refresh_interval = 15  # seconds
+refresh_interval = 30  # seconds
 st.sidebar.info(f"Auto-refresh: {refresh_interval}s")
 st.sidebar.caption(f"Last render: {datetime.now(EASTERN).strftime('%H:%M:%S %Z')}")
 
