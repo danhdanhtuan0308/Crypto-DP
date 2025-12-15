@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from .context import build_market_context
-from .deepseek_client import DeepSeekError, chat_completions, create_config
+from .grok_client import GrokError, chat_completions, create_config
 from .prompt_loader import load_yaml
 
 
@@ -61,23 +61,5 @@ def answer_with_ai(
             temperature=float(ai_cfg.get("temperature", 0.2)),
             max_tokens=int(ai_cfg.get("max_tokens", 900)),
         )
-    except DeepSeekError as e:
+    except GrokError as e:
         return f"AI error: {e}"
-
-
-# Backwards compatible name (older dashboard imports)
-def answer_with_deepseek(
-    *,
-    question: str,
-    df_full: pd.DataFrame,
-    timeline_label: str,
-    now_est,
-    package_dir: Optional[Path] = None,
-) -> str:
-    return answer_with_ai(
-        question=question,
-        df_full=df_full,
-        timeline_label=timeline_label,
-        now_est=now_est,
-        package_dir=package_dir,
-    )

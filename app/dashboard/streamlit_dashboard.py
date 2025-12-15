@@ -1283,21 +1283,29 @@ if st.session_state.ai_open:
             user_question = st.session_state.ai_messages[-2].get("content", "")
             
             # Show spinner while getting response
-            with st.spinner("AI is responding..."):
-                refresh_cached_data_from_gcs_for_ai()
-                df_for_ai = st.session_state.cached_dataframe
-                
-                if df_for_ai is not None:
-                    now_est = datetime.now(EASTERN)
-                    answer = answer_with_ai(
-                        question=user_question,
-                        df_full=df_for_ai,
-                        timeline_label=st.session_state.selected_timeline,
-                        now_est=now_est,
-                    )
-                    # Replace "thinking" message with actual response
-                    st.session_state.ai_messages[-1] = {"role": "assistant", "content": answer}
-                else:
-                    st.session_state.ai_messages[-1] = {"role": "assistant", "content": "Sorry, no data available to answer your question."}
+            try:
+                with st.spinner("AI is responding..."):
+                    refresh_cached_data_from_gcs_for_ai()
+                    df_for_ai = st.session_state.cached_dataframe
+
+                    if df_for_ai is None:
+                        st.session_state.ai_messages[-1] = {
+                            "role": "assistant",
+                            "content": "Sorry, no data available to answer your question.",
+                        }
+                    else:
+                        now_est = datetime.now(EASTERN)
+                        answer = answer_with_ai(
+                            question=user_question,
+                            df_full=df_for_ai,
+                            timeline_label=st.session_state.selected_timeline,
+                            now_est=now_est,
+                        )
+                        st.session_state.ai_messages[-1] = {"role": "assistant", "content": answer}
+            except Exception as e:
+                st.session_state.ai_messages[-1] = {
+                    "role": "assistant",
+                    "content": f"AI error: {type(e).__name__}: {str(e)[:300]}",
+                }
             
             st.rerun()
