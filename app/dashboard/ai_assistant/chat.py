@@ -59,7 +59,7 @@ def answer_with_ai(
             cfg,
             messages=messages,
             temperature=float(ai_cfg.get("temperature", 0.2)),
-            max_tokens=int(ai_cfg.get("max_tokens", 900)),
+            max_tokens=int(ai_cfg.get("max_tokens", 500)),
         )
     except GrokError as e:
         return f"AI error: {e}"
