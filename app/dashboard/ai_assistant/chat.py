@@ -11,7 +11,7 @@ from .deepseek_client import DeepSeekError, chat_completions, create_config
 from .prompt_loader import load_yaml
 
 
-def answer_with_deepseek(
+def answer_with_ai(
     *,
     question: str,
     df_full: pd.DataFrame,
@@ -48,9 +48,9 @@ def answer_with_deepseek(
     ]
 
     cfg = create_config(
-        base_url=str(ai_cfg.get("base_url", "https://api.deepseek.com")),
-        model=str(ai_cfg.get("model", "deepseek-chat")),
-        api_key_env=str(ai_cfg.get("api_key_env", "DEEPSEEK_API_KEY")),
+        base_url=str(ai_cfg.get("base_url", "https://api.x.ai/v1")),
+        model=str(ai_cfg.get("model", "grok-4-1-fast-reasoning")),
+        api_key_env=str(ai_cfg.get("api_key_env", "GROK_API_KEY")),
         timeout_seconds=float(ai_cfg.get("request_timeout_seconds", 30)),
     )
 
@@ -63,3 +63,21 @@ def answer_with_deepseek(
         )
     except DeepSeekError as e:
         return f"AI error: {e}"
+
+
+# Backwards compatible name (older dashboard imports)
+def answer_with_deepseek(
+    *,
+    question: str,
+    df_full: pd.DataFrame,
+    timeline_label: str,
+    now_est,
+    package_dir: Optional[Path] = None,
+) -> str:
+    return answer_with_ai(
+        question=question,
+        df_full=df_full,
+        timeline_label=timeline_label,
+        now_est=now_est,
+        package_dir=package_dir,
+    )

@@ -30,7 +30,7 @@ try:
 except Exception:
     pass
 
-from ai_assistant.chat import answer_with_deepseek
+from ai_assistant.chat import answer_with_ai
 
 # Page configuration
 st.set_page_config(
@@ -1289,7 +1289,7 @@ if st.session_state.ai_open:
                 
                 if df_for_ai is not None:
                     now_est = datetime.now(EASTERN)
-                    answer = answer_with_deepseek(
+                    answer = answer_with_ai(
                         question=user_question,
                         df_full=df_for_ai,
                         timeline_label=st.session_state.selected_timeline,

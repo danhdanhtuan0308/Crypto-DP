@@ -18,7 +18,7 @@ Real-time BTC data pipeline: **Coinbase WebSocket → Kafka → GCS → Dashboar
 **Dashboard** (`dashboard/`)
 - Live BTC monitoring with OHLC charts, volume, volatility
 - Auto-refresh every 60 seconds
-- **Danziel-AI**: DeepSeek-powered assistant for real-time market analysis
+- **Danziel-AI**: Grok-powered assistant for real-time market analysis
   - Analyzes latest 6 hours of 1-minute data
   - Floating chat interface (bottom-right corner)
   - Context-aware responses about prices, volumes, volatility, and order flow
@@ -58,7 +58,7 @@ GCP_SERVICE_ACCOUNT_JSON
 AIRFLOW_USERNAME
 AIRFLOW_PASSWORD
 
-# DeepSeek AI (dashboard service)
-DEEPSEEK_API_KEY
+# Grok AI (dashboard service)
+GROK_API_KEY
 
 

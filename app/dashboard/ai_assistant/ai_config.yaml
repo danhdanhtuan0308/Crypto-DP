@@ -1,7 +1,9 @@
-provider: deepseek
-base_url: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-model: ${DEEPSEEK_MODEL:-deepseek-chat}
-api_key_env: ${DEEPSEEK_API_KEY_ENV:-DEEPSEEK_API_KEY}
+provider: grok
+# xAI (Grok) provides an OpenAI-compatible chat completions endpoint.
+# Keep base_url WITHOUT trailing slash; code will call `${base_url}/chat/completions`.
+base_url: ${GROK_BASE_URL:-https://api.x.ai/v1}
+model: ${GROK_MODEL:-grok-4-1-fast-reasoning}
+api_key_env: ${GROK_API_KEY_ENV:-GROK_API_KEY}
 request_timeout_seconds: 30
 temperature: 0.2
 # Limit how much data we send to the model (360 = 6 hours of 1-minute data, fits within token limits)
