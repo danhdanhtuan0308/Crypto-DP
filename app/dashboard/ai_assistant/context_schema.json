@@ -8,12 +8,15 @@
       "properties": {
         "timeline": {"type": "string"},
         "now_est": {"type": "string"},
-        "rows": {"type": "integer"}
+        "rows_window": {"type": "integer"},
+        "rows_sent": {"type": "integer"}
       },
-      "required": ["timeline", "now_est", "rows"]
+      "required": ["timeline", "now_est", "rows_window", "rows_sent"]
     },
     "latest": {"type": ["object", "null"]},
+    "summary": {"type": "object"},
+    "hourly": {"type": "array", "items": {"type": "object"}},
     "rows": {"type": "array", "items": {"type": "object"} }
   },
-  "required": ["meta", "latest", "rows"]
+  "required": ["meta", "latest", "summary", "hourly", "rows"]
 }

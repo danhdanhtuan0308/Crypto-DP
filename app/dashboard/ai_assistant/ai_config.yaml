@@ -6,5 +6,5 @@ model: ${GROK_MODEL:-grok-4-1-fast-reasoning}
 api_key_env: ${GROK_API_KEY_ENV:-GROK_API_KEY}
 request_timeout_seconds: 30
 temperature: 0.2
-# Limit how much data we send to the model (360 = 6 hours of 1-minute data, fits within token limits)
-data_rows_max: 360
+# Use up to 24 hours of 1-minute data (1440 rows). Context builder will summarize/compress to stay within token limits.
+data_rows_max: 1440
